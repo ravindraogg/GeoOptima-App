@@ -9,12 +9,36 @@ class OtpVerificationScreen extends StatefulWidget {
 }
 
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
-  final TextEditingController _otpController = TextEditingController();
+  // Replace the single controller with a list of controllers
+  final List<TextEditingController> _otpControllers = List.generate(
+    4,
+    (index) => TextEditingController(),
+  );
+
+  final List<FocusNode> _otpFocusNodes = List.generate(
+    4,
+    (index) => FocusNode(),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+  }
 
   @override
   void dispose() {
-    _otpController.dispose();
+    for (var controller in _otpControllers) {
+      controller.dispose();
+    }
+    for (var focusNode in _otpFocusNodes) {
+      focusNode.dispose();
+    }
     super.dispose();
+  }
+
+  // Add a method to get the complete OTP
+  String get completeOtp {
+    return _otpControllers.map((controller) => controller.text).join();
   }
 
   @override
@@ -24,7 +48,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     final screenHeight = MediaQuery.of(context).size.height;
     
     // Use these dimensions to calculate responsive sizes
-    // Base design was for 402x874, now we'll make it proportional
     final widthRatio = screenWidth / 402;
     final heightRatio = screenHeight / 874;
     
@@ -37,16 +60,44 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         decoration: const BoxDecoration(color: Colors.white),
         child: Stack(
           children: [
-            // G Text
+            // Polygon image / G background
+             Positioned(
+              left: -4,
+              top: 0,
+              child: Image.asset(
+                'assets/poly2.png',
+                width: screenWidth * 0.2,
+                height: screenWidth * 0.2,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    width: screenWidth * 0.2,
+                    height: screenWidth * 0.2,
+                    color: Colors.red,
+                    child: const Center(child: Text('Image Error')),
+                  );
+                },
+              ),
+            ),
+            // G text
             Positioned(
-              left: 19 * widthRatio,
-              top: 9 * heightRatio,
-              child: Text(
-                'G',
-                style: GoogleFonts.montserrat(
-                  color: Colors.white,
-                  fontSize: 64 * widthRatio,
-                  fontWeight: FontWeight.w400,
+              left: screenWidth * 0.00,
+              top: screenHeight * -0.02,
+              child: GestureDetector(
+                onTap: () {
+                  debugPrint('Back button tapped');
+                  Navigator.pop(context); // Navigates back to the previous screen
+                },
+                child: Container(
+                  padding: EdgeInsets.all(10 * widthRatio),
+                  child: Text(
+                    'G',
+                    style: GoogleFonts.montserrat(
+                      color: Colors.white,
+                      fontSize: screenWidth * 0.16,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -111,6 +162,20 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               ),
             ),
             
+            // Enter your OTP text
+            Positioned(
+              left: 27 * widthRatio,
+              top: 437 * heightRatio,
+              child: Text(
+                'Enter your OTP',
+                style: GoogleFonts.montserrat(
+                  color: Colors.black,
+                  fontSize: 20 * widthRatio,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            
             // OTP TextField container
             Positioned(
               left: 27 * widthRatio,
@@ -118,81 +183,109 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               child: Container(
                 width: 347 * widthRatio,
                 height: 67 * heightRatio,
-                decoration: ShapeDecoration(
-                  color: const Color(0xFFD9D9D9),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30 * widthRatio),
-                  ),
-                ),
-                child: TextField(
-                  controller: _otpController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.only(
-                      left: 30 * widthRatio,
-                      bottom: 15 * heightRatio,
-                    ),
-                    hintText: '',
-                  ),
-                  style: GoogleFonts.montserrat(
-                    fontSize: 20 * widthRatio,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black,
-                  ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: List.generate(4, (index) {
+                    return Container(
+                      width: 75 * widthRatio,
+                      height: 67 * heightRatio,
+                      decoration: ShapeDecoration(
+                        color: const Color(0xFFD9D9D9),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15 * widthRatio),
+                        ),
+                      ),
+                      child: TextField(
+                        controller: _otpControllers[index],
+                        focusNode: _otpFocusNodes[index],
+                        onChanged: (value) {
+                          // Auto-focus to next field when a digit is entered
+                          if (value.length == 1 && index < 3) {
+                            FocusScope.of(context).requestFocus(_otpFocusNodes[index + 1]);
+                          }
+                        },
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        maxLength: 1,
+                        decoration: InputDecoration(
+                          border: InputBorder.none,
+                          counterText: '', // Hide the counter
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 10 * widthRatio,
+                            vertical: 15 * heightRatio,
+                          ),
+                        ),
+                        style: GoogleFonts.montserrat(
+                          fontSize: 24 * widthRatio,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black,
+                        ),
+                      ),
+                    );
+                  }),
                 ),
               ),
             ),
             
-            // Verify button container
+Positioned(
+  left: 264 * widthRatio,
+  top: 601 * heightRatio,
+  child: GestureDetector(
+    onTap: () {
+      // Process OTP verification
+      final otp = completeOtp;
+      if (otp.length == 4) {
+        debugPrint('OTP submitted for verification: $otp');
+        // Add your OTP verification logic here
+      } else {
+        // Show error if OTP is incomplete
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter complete OTP code')),
+        );
+      }
+    },
+    child: Container(
+      width: 110 * widthRatio,
+      height: 51 * heightRatio,
+      decoration: ShapeDecoration(
+        shape: RoundedRectangleBorder(
+          side: BorderSide(width: 3 * widthRatio),
+          borderRadius: BorderRadius.circular(30 * widthRatio),
+        ),
+      ),
+      child: Center(
+        child: Text(
+          'Verify',
+          style: GoogleFonts.montserrat(
+            color: Colors.black,
+            fontSize: 20 * widthRatio,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    ),
+  ),
+),
+            // Resend code option with black color
             Positioned(
-              left: 264 * widthRatio,
-              top: 601 * heightRatio,
+              left: 27 * widthRatio,
+              top: 615 * heightRatio,
               child: GestureDetector(
                 onTap: () {
-                  // Process OTP verification
-                  if (_otpController.text.isNotEmpty) {
-                    debugPrint('OTP submitted for verification: ${_otpController.text}');
-                    // Add your OTP verification logic here
-                  }
+                  // Add resend code logic here
+                  debugPrint('Resend code requested');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('OTP code resent')),
+                  );
                 },
-                child: Container(
-                  width: 110 * widthRatio,
-                  height: 51 * heightRatio,
-                  decoration: ShapeDecoration(
-                    shape: RoundedRectangleBorder(
-                      side: BorderSide(width: 3 * widthRatio),
-                      borderRadius: BorderRadius.circular(30 * widthRatio),
-                    ),
+                child: Text(
+                  'Resend code',
+                  style: GoogleFonts.montserrat(
+                    color: Colors.black, // Changed from blue to black
+                    fontSize: 16 * widthRatio,
+                    fontWeight: FontWeight.w500,
+                    decoration: TextDecoration.underline,
                   ),
-                ),
-              ),
-            ),
-            
-            // Enter your OTP text
-            Positioned(
-              left: 57 * widthRatio,
-              top: 499 * heightRatio,
-              child: Text(
-                'Enter your otp.....',
-                style: GoogleFonts.montserrat(
-                  color: Colors.black,
-                  fontSize: 20 * widthRatio,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            
-            // Verify text
-            Positioned(
-              left: 290 * widthRatio,
-              top: 615 * heightRatio,
-              child: Text(
-                'Verify',
-                style: GoogleFonts.montserrat(
-                  color: Colors.black,
-                  fontSize: 20 * widthRatio,
-                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),

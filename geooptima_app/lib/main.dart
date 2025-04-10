@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geooptima_app/pages/register.dart';
+import 'package:geooptima_app/pages/login.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 
@@ -17,7 +18,12 @@ class MyApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const ResponsiveScreen(),
-        '/register': (context) => const RegisterScreen(), // Points to your RegisterScreen in register.dart
+        '/register':
+            (context) =>
+                const RegisterScreen(),
+        '/login':
+            (context) =>
+                const LoginScreen(), // Points to your RegisterScreen in register.dart
       },
     );
   }
@@ -88,9 +94,7 @@ class _ResponsiveScreenState extends State<ResponsiveScreen> {
                       width: 844 * widthRatio,
                       height: 475 * heightRatio,
                       color: Colors.black12,
-                      child: const Center(
-                        child: CircularProgressIndicator(),
-                      ),
+                      child: const Center(child: CircularProgressIndicator()),
                     );
                   }
                 },
@@ -172,8 +176,18 @@ class _ResponsiveScreenState extends State<ResponsiveScreen> {
               left: 218 * widthRatio,
               top: 655 * heightRatio,
               child: GestureDetector(
+                onTapDown:
+                    (_) => print('Tap down detected'), // Debug when tap starts
+                onTapUp: (_) => print('Tap up detected'), // Debug when tap ends
                 onTap: () {
-                  Navigator.pushNamed(context, '/register');
+                  print('Get Started tapped'); // Confirm tap completion
+                  Navigator.pushNamed(context, '/register')
+                      .then((_) {
+                        print('Navigation to register completed');
+                      })
+                      .catchError((error) {
+                        print('Navigation error: $error');
+                      });
                 },
                 child: Container(
                   width: 167 * widthRatio,
@@ -185,23 +199,20 @@ class _ResponsiveScreenState extends State<ResponsiveScreen> {
                       borderRadius: BorderRadius.circular(20 * widthRatio),
                     ),
                   ),
+                  child: Center(
+                    // Added Center widget to ensure text is properly positioned
+                    child: Text(
+                      'Get Started',
+                      style: GoogleFonts.montserrat(
+                        color: Colors.black,
+                        fontSize: 25 * widthRatio,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
-            // Get Started text
-            Positioned(
-              left: 230 * widthRatio,
-              top: 669 * heightRatio,
-              child: Text(
-                'Get Started',
-                style: GoogleFonts.montserrat(
-                  color: Colors.black,
-                  fontSize: 25 * widthRatio,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ),
-            // Polygon image
             Positioned(
               left: -4,
               top: 0,
@@ -250,16 +261,34 @@ class _ResponsiveScreenState extends State<ResponsiveScreen> {
             Positioned(
               left: 281 * widthRatio,
               top: 24 * heightRatio,
+              child: GestureDetector(
+                onTapDown:
+                    (_) => print('Tap down detected'), // Debug when tap starts
+                onTapUp: (_) => print('Tap up detected'), // Debug when tap ends
+                onTap: () {
+                  print('Get Started tapped'); // Confirm tap completion
+                  Navigator.pushNamed(context, '/login')
+                      .then((_) {
+                        print('Navigation to register completed');
+                      })
+                      .catchError((error) {
+                        print('Navigation error: $error');
+                      });
+                },
               child: Container(
                 width: 100 * widthRatio,
                 height: 50 * heightRatio,
                 decoration: ShapeDecoration(
                   shape: RoundedRectangleBorder(
-                    side: BorderSide(width: 2 * widthRatio, color: Colors.white),
+                    side: BorderSide(
+                      width: 2 * widthRatio,
+                      color: Colors.white,
+                    ),
                     borderRadius: BorderRadius.circular(20 * widthRatio),
                   ),
                 ),
               ),
+            ),
             ),
             // GeoOptima heading
             Positioned(
