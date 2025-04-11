@@ -1,4 +1,4 @@
-# geooptima_app
+# geooptimaapp
 
 A new Flutter project.
 

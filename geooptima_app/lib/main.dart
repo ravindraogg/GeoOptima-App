@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:geooptima_app/pages/home.dart';
-import 'package:geooptima_app/pages/register.dart';
-import 'package:geooptima_app/pages/login.dart';
+import 'package:geooptimaapp/pages/home.dart';
+import 'package:geooptimaapp/pages/register.dart';
+import 'package:geooptimaapp/pages/login.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:developer' as developer;
+import 'package:shared_preferences/shared_preferences.dart';
+
 Future<void> main() async {
-  runApp(const MyApp());
-   try {
+  WidgetsFlutterBinding.ensureInitialized();
+  bool isLoggedIn = await checkLoginStatus();
+  runApp(MyApp(isLoggedIn: isLoggedIn));
+
+  try {
     await dotenv.load(fileName: "assets/.env");
     developer.log("Loaded .env successfully", name: 'Main');
   } catch (e) {
@@ -17,8 +22,15 @@ Future<void> main() async {
   }
 }
 
+Future<bool> checkLoginStatus() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getBool('isLoggedIn') ?? false;
+}
+
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final bool isLoggedIn;
+
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
@@ -54,13 +66,15 @@ class _ResponsiveScreenState extends State<ResponsiveScreen> {
     _controller.setLooping(true);
     _controller.play();
   }
-Future<void> requestLocationPermission() async {
-  var status = await Permission.location.status;
 
-  if (!status.isGranted) {
-    await Permission.location.request();
+  Future<void> requestLocationPermission() async {
+    var status = await Permission.location.status;
+
+    if (!status.isGranted) {
+      await Permission.location.request();
+    }
   }
-}
+
   @override
   void dispose() {
     _controller.dispose();
@@ -74,7 +88,7 @@ Future<void> requestLocationPermission() async {
     final widthRatio = screenWidth / 402;
     final heightRatio = screenHeight / 874;
 
-    return SafeArea( 
+    return SafeArea(
       child: Scaffold(
         body: Container(
           width: screenWidth,

@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:geooptima_app/pages/otp-verification.dart';
+import 'package:geooptimaapp/pages/otp-verification.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
@@ -32,8 +32,6 @@ class _RegisterScreenState extends State<RegisterScreen>
   String _selectedGender = 'Male';
   final List<String> _genderOptions = ['Male', 'Female', 'Other'];
   bool _isGenderDropdownOpen = false;
-
-  late AnimationController _animationController;
 
   String _selectedCountryCode = '+91';
   String _selectedCountryFlag = '🇮🇳';
@@ -605,8 +603,8 @@ class _RegisterScreenState extends State<RegisterScreen>
               ),
             ),
             Positioned(
-              left: 21 * widthRatio, 
-              top: 170 * heightRatio, 
+              left: 21 * widthRatio,
+              top: 170 * heightRatio,
               child: Text(
                 'Be a\nOptima',
                 textAlign: TextAlign.left,

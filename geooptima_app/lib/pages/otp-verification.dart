@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phoneNumber;
@@ -41,6 +42,15 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
   String get completeOtp => _otpControllers.map((controller) => controller.text).join();
 
+  // Save login state and token to shared preferences
+  Future<void> _saveLoginState(String token) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLoggedIn', true);
+    await prefs.setString('authToken', token);
+    await prefs.setString('phoneNumber', widget.phoneNumber);
+    debugPrint('Login state saved: isLoggedIn=true, token=$token');
+  }
+
   Future<void> _verifyOtp() async {
     if (completeOtp.length != 4) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -70,6 +80,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final String token = data['token'] ?? '';
+        
+        // Save login state when verification is successful
+        await _saveLoginState(token);
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(data['message'])),
         );

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import 'dart:async';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
@@ -14,19 +15,18 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  LatLng _currentPosition = LatLng(12.9549, 77.5742); // Default position (Bangalore)
-  final MapController _mapController = MapController();
+  static const platform = MethodChannel('ola_map_channel');
+  LatLng _currentPosition = LatLng(12.9549, 77.5742); 
   bool _isLoading = true;
   List<Map<String, dynamic>> _recentVisits = [];
-  String _tomtomApiKey = '';
+  String _olaMapsApiKey = '';
   bool _isMapError = false;
   String _errorMessage = '';
-  
-  // For draggable bottom sheet
+
   final DraggableScrollableController _dragController = DraggableScrollableController();
-  double _initialBottomSheetHeight = 0.25; // 25% of screen height
+  double _initialBottomSheetHeight = 0.25;
   double _minBottomSheetHeight = 0.25;
-  double _maxBottomSheetHeight = 0.8; // 80% of screen height
+  double _maxBottomSheetHeight = 0.8;
 
   @override
   void initState() {
@@ -36,31 +36,90 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _initializeApp() async {
     await _loadApiKey();
+    await _initializeMap();
     await _getUserLocation();
-    _loadRecentVisits();
+    await _loadRecentVisits();
   }
 
   Future<void> _loadApiKey() async {
     try {
-      // Make sure dotenv is loaded before trying to access env variables
       await dotenv.load(fileName: "assets/.env");
-      _tomtomApiKey = dotenv.env['TOMTOM_API_KEY'] ?? '';
+      _olaMapsApiKey = dotenv.env['OLA_MAPS_API_KEY'] ?? '';
       
-      if (_tomtomApiKey.isEmpty) {
+      if (_olaMapsApiKey.isEmpty) {
         setState(() {
           _isMapError = true;
-          _errorMessage = 'TomTom API key not found. Using OpenStreetMap as fallback.';
+          _errorMessage = 'Ola Maps API key not found.';
         });
         print('Warning: $_errorMessage');
       } else {
-        print('API Key loaded successfully: ${_tomtomApiKey.substring(0, 3)}...');
+        print('API Key loaded successfully: ${_olaMapsApiKey.substring(0, 3)}...');
+        await _validateApiKey();
       }
     } catch (e) {
       setState(() {
         _isMapError = true;
-        _errorMessage = 'Failed to load .env file. Using OpenStreetMap as fallback.';
+        _errorMessage = 'Failed to load .env file.';
       });
       print('Warning: $_errorMessage');
+    }
+  }
+
+  Future<void> _validateApiKey() async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json?api_key=$_olaMapsApiKey'),
+      );
+      if (response.statusCode != 200) {
+        setState(() {
+          _isMapError = true;
+          _errorMessage = 'Invalid Ola Maps API key (Status ${response.statusCode}).';
+        });
+        print('Warning: $_errorMessage');
+      }
+    } catch (e) {
+      setState(() {
+        _isMapError = true;
+        _errorMessage = 'Failed to validate Ola Maps API key.';
+      });
+      print('Warning: $_errorMessage');
+    }
+  }
+
+  Future<void> _initializeMap() async {
+    try {
+      final result = await platform.invokeMethod('initializeMap', {'apiKey': _olaMapsApiKey});
+      print(result);
+    } on PlatformException catch (e) {
+      setState(() {
+        _isMapError = true;
+        _errorMessage = 'Failed to initialize map: ${e.message}';
+      });
+      print('Error: $_errorMessage');
+    }
+  }
+
+  Future<void> _moveCamera(LatLng position, [double zoom = 15.0]) async {
+    try {
+      await platform.invokeMethod('moveCamera', {
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'zoom': zoom,
+      });
+    } on PlatformException catch (e) {
+      print('Error moving camera: ${e.message}');
+    }
+  }
+
+  Future<void> _addMarker(LatLng position, String id) async {
+    try {
+      await platform.invokeMethod('addMarker', {
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'id': id,
+      });
+    } on PlatformException catch (e) {
+      print('Error adding marker: ${e.message}');
     }
   }
 
@@ -91,7 +150,7 @@ class _HomePageState extends State<HomePage> {
 
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 5),
+        timeLimit: const Duration(seconds: 5),
       );
       
       setState(() {
@@ -99,7 +158,8 @@ class _HomePageState extends State<HomePage> {
         _isLoading = false;
       });
       
-      _mapController.move(_currentPosition, 15);
+      await _moveCamera(_currentPosition);
+      await _addMarker(_currentPosition, 'current');
     } catch (e) {
       print('Error getting location: $e');
       _tryUseLastKnownPosition();
@@ -109,31 +169,23 @@ class _HomePageState extends State<HomePage> {
   void _showLocationServiceDisabledMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Location services are disabled. Using default location.'),
-        action: SnackBarAction(
-          label: 'Enable',
-          onPressed: () => Geolocator.openLocationSettings(),
-        ),
+        content: const Text('Location services are disabled. Using default location.'),
+        action: SnackBarAction(label: 'Enable', onPressed: () => Geolocator.openLocationSettings()),
       ),
     );
   }
 
   void _showLocationPermissionDeniedMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Location permission denied. Using default location.'),
-      ),
+      const SnackBar(content: Text('Location permission denied. Using default location.')),
     );
   }
 
   void _showLocationPermissionPermanentlyDeniedMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Location permission permanently denied. Using default location.'),
-        action: SnackBarAction(
-          label: 'Settings',
-          onPressed: () => Geolocator.openAppSettings(),
-        ),
+        content: const Text('Location permission permanently denied. Using default location.'),
+        action: SnackBarAction(label: 'Settings', onPressed: () => Geolocator.openAppSettings()),
       ),
     );
   }
@@ -146,46 +198,76 @@ class _HomePageState extends State<HomePage> {
           _currentPosition = LatLng(position.latitude, position.longitude);
           _isLoading = false;
         });
-        _mapController.move(_currentPosition, 15);
+        await _moveCamera(_currentPosition);
+        await _addMarker(_currentPosition, 'current');
       } else {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _loadRecentVisits() async {
-    // In a real app, you would load these from local storage or an API
-    // This is mock data for demonstration
+    final List<Map<String, dynamic>> predefinedVisits = [
+      {'name': 'Centro Médico Nacional', 'location': LatLng(19.406397, -99.164989)},
+      {'name': 'ISKCON Bangalore', 'location': LatLng(13.0108, 77.5511)},
+      {'name': 'Central Park', 'location': LatLng(40.7812, -73.9665)},
+    ];
+
+    List<Map<String, dynamic>> visits = [];
+    
+    for (var visit in predefinedVisits) {
+      try {
+        final response = await http.get(
+          Uri.parse(
+            'https://api.olamaps.io/places/v1/nearbysearch'
+            '?api_key=$_olaMapsApiKey'
+            '&location=${visit['location'].latitude},${visit['location'].longitude}'
+            '&radius=1000'
+          ),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['predictions'] != null && data['predictions'].isNotEmpty) {
+            final result = data['predictions'][0];
+            String imageUrl = 'https://via.placeholder.com/300x180.png?text=${Uri.encodeComponent(result['description'] ?? visit['name'])}';
+
+            visits.add({
+              'name': result['description'] ?? visit['name'],
+              'image': imageUrl,
+              'location': visit['location'],
+              'address': result['description'] ?? 'Unknown Address',
+              'rating': 4.5 + (visits.length * 0.3),
+            });
+
+            await _addMarker(visit['location'], 'visit_${visits.length}');
+          }
+        } else {
+          print('Failed to fetch visit ${visit['name']}: ${response.statusCode}');
+          visits.add({
+            'name': visit['name'],
+            'image': 'https://via.placeholder.com/300x180.png?text=Error',
+            'location': visit['location'],
+            'address': 'Failed to load address',
+            'rating': 4.0,
+          });
+        }
+      } catch (e) {
+        print('Error fetching visit ${visit['name']}: $e');
+        visits.add({
+          'name': visit['name'],
+          'image': 'https://via.placeholder.com/300x180.png?text=Error',
+          'location': visit['location'],
+          'address': 'Failed to load address',
+          'rating': 4.0,
+        });
+      }
+    }
+
     setState(() {
-      _recentVisits = [
-        {
-          'name': 'Centro Médico Nacional',
-          'image': 'assets/images/centro_medico.jpg',
-          'location': LatLng(19.406397, -99.164989),
-          'address': '123 Main St, Mexico City, Mexico',
-          'rating': 4.5,
-        },
-        {
-          'name': 'ISKCON Bangalore',
-          'image': 'assets/images/iskcon.jpg',
-          'location': LatLng(13.0108, 77.5511),
-          'address': 'Hare Krishna Hill, Bangalore, India',
-          'rating': 4.8,
-        },
-        {
-          'name': 'Central Park',
-          'image': 'assets/images/central_park.jpg',
-          'location': LatLng(40.7812, -73.9665),
-          'address': 'New York, NY, USA',
-          'rating': 4.9,
-        },
-      ];
+      _recentVisits = visits;
     });
   }
 
@@ -197,35 +279,17 @@ class _HomePageState extends State<HomePage> {
           width: MediaQuery.of(context).size.width,
           height: MediaQuery.of(context).size.height,
           clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(color: Colors.white),
+          decoration: const BoxDecoration(color: Colors.white),
           child: Stack(
             children: [
-              // Map
-              _buildMap(),
-              
-              // Left sidebar
+              const AndroidView(viewType: 'ola_map_view'), // Embeds OlaMapView
               _buildSidebar(),
-              
-              // Search bar
               _buildSearchBar(),
-              
-              // Category filters
               _buildCategoryFilters(),
-              
-              // Bottom Recent Visits (Draggable)
               _buildDraggableRecentVisits(),
-              
-              // Location button
               _buildLocationButton(),
-
-              // Loading indicator
-              if (_isLoading)
-                Center(
-                  child: CircularProgressIndicator(),
-                ),
-
-              // Error message if map fails to load
-              if (_isMapError && _tomtomApiKey.isEmpty)
+              if (_isLoading) const Center(child: CircularProgressIndicator()),
+              if (_isMapError)
                 Center(
                   child: Container(
                     padding: const EdgeInsets.all(16),
@@ -238,37 +302,18 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         const Icon(Icons.error_outline, color: Colors.orange, size: 48),
                         const SizedBox(height: 8),
-                        Text(
-                          'Map API Notice',
-                          style: GoogleFonts.montserrat(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
+                        Text('Map API Notice', style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
                         const SizedBox(height: 8),
-                        Text(
-                          _errorMessage,
-                          style: GoogleFonts.montserrat(),
-                          textAlign: TextAlign.center,
-                        ),
+                        Text(_errorMessage, style: GoogleFonts.montserrat(), textAlign: TextAlign.center),
                         const SizedBox(height: 16),
                         ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              _isMapError = false;
-                            });
-                          },
+                          onPressed: () => setState(() => _isMapError = false),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.black,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
-                          child: Text(
-                            'Dismiss',
-                            style: GoogleFonts.montserrat(),
-                          ),
+                          child: Text('Dismiss', style: GoogleFonts.montserrat()),
                         ),
                       ],
                     ),
@@ -281,95 +326,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildMap() {
-    // Fall back to OpenStreetMap if TomTom API key is missing
-    final bool useFallbackMap = _tomtomApiKey.isEmpty;
-    final String urlTemplate = useFallbackMap
-        ? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
-        : 'https://api.tomtom.com/map/1/tile/basic/{z}/{x}/{y}.png?key={apiKey}';
-    
-    return FlutterMap(
-      mapController: _mapController,
-      options: MapOptions(
-        center: _currentPosition,
-        zoom: 15,
-        maxZoom: 18,
-        minZoom: 3,
-        interactiveFlags: InteractiveFlag.all,
-        onMapEvent: (MapEvent event) {
-          if (event is MapEventMoveEnd) {
-            print('Map moved to: ${event.camera.center}, zoom: ${event.camera.zoom}');
-          }
-        },
-      ),
-      children: [
-       TileLayer(
-  urlTemplate: urlTemplate,
-  additionalOptions: useFallbackMap ? {} : {'apiKey': _tomtomApiKey},
-  userAgentPackageName: 'com.example.app',
-  tileProvider: NetworkTileProvider(),
-  // Just remove the errorImage parameter or use an asset
-  // errorImage: AssetImage('assets/images/map_error.png'),
-  evictErrorTileStrategy: EvictErrorTileStrategy.dispose,
-  errorTileCallback: (tile, error, stackTrace) {
-    print('Error loading tile: $error');
-    if (error.toString().contains('No host specified in URI')) {
-      // This is expected for the initial load, don't show an error
-      return;
-    }
-    
-    // Only show the error if it's not the "empty API key" error we already handle
-    if (!_isMapError && _tomtomApiKey.isNotEmpty) {
-      setState(() {
-        _isMapError = true;
-        _errorMessage = 'Failed to load map tiles. Check your internet connection.';
-      });
-    }
-  },
-),
-        MarkerLayer(
-          markers: [
-            Marker(
-              point: _currentPosition,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.3),
-                  shape: BoxShape.circle,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: Icon(
-                    Icons.location_on,
-                    color: Colors.red,
-                    size: 30,
-                  ),
-                ),
-              ),
-            ),
-            // Add markers for recent visits
-            ..._recentVisits.map((visit) => Marker(
-              point: visit['location'],
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.3),
-                  shape: BoxShape.circle,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: Icon(
-                    Icons.place,
-                    color: Colors.blue,
-                    size: 25,
-                  ),
-                ),
-              ),
-            )).toList(),
-          ],
-        ),
-      ],
-    );
-  }
-
   Widget _buildSidebar() {
     return Positioned(
       left: 0,
@@ -379,34 +335,14 @@ class _HomePageState extends State<HomePage> {
         width: 60,
         decoration: const ShapeDecoration(
           color: Colors.black,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.only(
-              topRight: Radius.circular(15),
-              bottomRight: Radius.circular(15),
-            ),
-          ),
-          shadows: [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 8,
-              offset: Offset(2, 0),
-            ),
-          ],
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.only(topRight: Radius.circular(15), bottomRight: Radius.circular(15))),
+          shadows: [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(2, 0))],
         ),
         child: Column(
           children: [
             const SizedBox(height: 15),
-            Text(
-              'G',
-              style: GoogleFonts.montserrat(
-                textStyle: TextStyle(
-                  color: Colors.white,
-                  fontSize: 40,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            const SizedBox(height: 60), // Increased to move icons down
+            Text('G', style: GoogleFonts.montserrat(textStyle: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w500))),
+            const SizedBox(height: 60),
             _sidebarButton(Icons.person, () {}),
             const SizedBox(height: 25),
             _sidebarButton(Icons.grid_view, () {}),
@@ -430,18 +366,11 @@ class _HomePageState extends State<HomePage> {
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: Color(0x33D9D9D9),
+          color: const Color(0x33D9D9D9),
           shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withOpacity(0.1),
-            width: 1,
-          ),
+          border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
         ),
-        child: Icon(
-          icon,
-          color: Colors.white,
-          size: 22,
-        ),
+        child: Icon(icon, color: Colors.white, size: 22),
       ),
     );
   }
@@ -455,40 +384,15 @@ class _HomePageState extends State<HomePage> {
         height: 48,
         decoration: ShapeDecoration(
           color: Colors.white,
-          shape: RoundedRectangleBorder(
-            side: const BorderSide(width: 2),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          shadows: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 4,
-              offset: Offset(0, 2),
-            ),
-          ],
+          shape: RoundedRectangleBorder(side: const BorderSide(width: 2), borderRadius: BorderRadius.circular(24)),
+          shadows: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 4, offset: const Offset(0, 2))],
         ),
         child: Row(
           children: [
             const SizedBox(width: 16),
-            Text(
-              'Search',
-              style: GoogleFonts.montserrat(
-                textStyle: TextStyle(
-                  color: Colors.black.withOpacity(0.6),
-                  fontSize: 20,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
+            Text('Search', style: GoogleFonts.montserrat(textStyle: TextStyle(color: Colors.black.withOpacity(0.6), fontSize: 20, fontWeight: FontWeight.w500))),
             const Spacer(),
-            Padding(
-              padding: const EdgeInsets.only(right: 16.0),
-              child: Icon(
-                Icons.search,
-                color: Colors.black,
-                size: 25,
-              ),
-            ),
+            const Padding(padding: EdgeInsets.only(right: 16.0), child: Icon(Icons.search, color: Colors.black, size: 25)),
           ],
         ),
       ),
@@ -524,33 +428,15 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: ShapeDecoration(
         color: Colors.white,
-        shape: RoundedRectangleBorder(
-          side: const BorderSide(width: 1.5, color: Colors.black87),
-          borderRadius: BorderRadius.circular(15),
-        ),
-        shadows: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 3,
-            offset: Offset(0, 1),
-          ),
-        ],
+        shape: RoundedRectangleBorder(side: const BorderSide(width: 1.5, color: Colors.black87), borderRadius: BorderRadius.circular(15)),
+        shadows: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 3, offset: const Offset(0, 1))],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 18),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: GoogleFonts.montserrat(
-              textStyle: TextStyle(
-                color: Colors.black,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
+          Text(label, style: GoogleFonts.montserrat(textStyle: const TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.w500))),
         ],
       ),
     );
@@ -566,31 +452,18 @@ class _HomePageState extends State<HomePage> {
         return Container(
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(25),
-              topRight: Radius.circular(25),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 8,
-                offset: Offset(0, -3),
-              ),
-            ],
+            borderRadius: const BorderRadius.only(topLeft: Radius.circular(25), topRight: Radius.circular(25)),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, -3))],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Drag handle
               Center(
                 child: Container(
-                  margin: EdgeInsets.symmetric(vertical: 8),
+                  margin: const EdgeInsets.symmetric(vertical: 8),
                   width: 40,
                   height: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               Padding(
@@ -598,74 +471,43 @@ class _HomePageState extends State<HomePage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Recent Visits',
-                      style: GoogleFonts.montserrat(
-                        textStyle: TextStyle(
-                          color: Colors.black,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.more_horiz),
-                      onPressed: () {},
-                    ),
+                    Text('Recent Visits', style: GoogleFonts.montserrat(textStyle: const TextStyle(color: Colors.black, fontSize: 22, fontWeight: FontWeight.w600))),
+                    IconButton(icon: const Icon(Icons.more_horiz), onPressed: () {}),
                   ],
                 ),
               ),
               Expanded(
                 child: _recentVisits.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No recent visits',
-                          style: GoogleFonts.montserrat(
-                            color: Colors.grey,
-                            fontSize: 16,
-                          ),
-                        ),
-                      )
+                    ? Center(child: Text('No recent visits', style: GoogleFonts.montserrat(color: Colors.grey, fontSize: 16)))
                     : ListView.builder(
                         controller: scrollController,
-                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
                         itemCount: _recentVisits.length,
                         itemBuilder: (context, index) {
                           final visit = _recentVisits[index];
                           return GestureDetector(
-                            onTap: () {
-                              _mapController.move(visit['location'], 15);
-                            },
+                            onTap: () => _moveCamera(visit['location']),
                             child: Container(
-                              margin: EdgeInsets.only(bottom: 20),
+                              margin: const EdgeInsets.only(bottom: 20),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(20),
                                 color: Colors.white,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 8,
-                                    offset: Offset(0, 2),
-                                  ),
-                                ],
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // Image
                                   Container(
                                     height: 180,
                                     decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.vertical(
-                                        top: Radius.circular(20),
-                                      ),
+                                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                                       image: DecorationImage(
-                                        image: AssetImage(visit['image']),
+                                        image: NetworkImage(visit['image']),
                                         fit: BoxFit.cover,
+                                        onError: (_, __) => const AssetImage('assets/placeholder.jpg'),
                                       ),
                                     ),
                                   ),
-                                  // Details
                                   Padding(
                                     padding: const EdgeInsets.all(12),
                                     child: Column(
@@ -674,50 +516,23 @@ class _HomePageState extends State<HomePage> {
                                         Row(
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Text(
-                                              visit['name'],
-                                              style: GoogleFonts.montserrat(
-                                                textStyle: TextStyle(
-                                                  color: Colors.black,
-                                                  fontSize: 18,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
+                                            Text(visit['name'], style: GoogleFonts.montserrat(textStyle: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.w600))),
                                             Row(
                                               children: [
-                                                Icon(Icons.star, color: Colors.amber, size: 18),
-                                                SizedBox(width: 4),
-                                                Text(
-                                                  '${visit['rating']}',
-                                                  style: GoogleFonts.montserrat(
-                                                    textStyle: TextStyle(
-                                                      color: Colors.black,
-                                                      fontSize: 14,
-                                                      fontWeight: FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                ),
+                                                const Icon(Icons.star, color: Colors.amber, size: 18),
+                                                const SizedBox(width: 4),
+                                                Text('${visit['rating']}', style: GoogleFonts.montserrat(textStyle: const TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.w500))),
                                               ],
                                             ),
                                           ],
                                         ),
-                                        SizedBox(height: 6),
-                                        Text(
-                                          visit['address'],
-                                          style: GoogleFonts.montserrat(
-                                            textStyle: TextStyle(
-                                              color: Colors.grey.shade700,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w400,
-                                            ),
-                                          ),
-                                        ),
-                                        SizedBox(height: 10),
+                                        const SizedBox(height: 6),
+                                        Text(visit['address'], style: GoogleFonts.montserrat(textStyle: TextStyle(color: Colors.grey.shade700, fontSize: 14, fontWeight: FontWeight.w400))),
+                                        const SizedBox(height: 10),
                                         Row(
                                           children: [
                                             _actionButton(Icons.directions, 'Directions'),
-                                            SizedBox(width: 12),
+                                            const SizedBox(width: 12),
                                             _actionButton(Icons.info_outline, 'Details'),
                                           ],
                                         ),
@@ -740,7 +555,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _actionButton(IconData icon, String label) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.grey.shade100,
         borderRadius: BorderRadius.circular(20),
@@ -750,17 +565,8 @@ class _HomePageState extends State<HomePage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 16, color: Colors.black87),
-          SizedBox(width: 6),
-          Text(
-            label,
-            style: GoogleFonts.montserrat(
-              textStyle: TextStyle(
-                color: Colors.black87,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
+          const SizedBox(width: 6),
+          Text(label, style: GoogleFonts.montserrat(textStyle: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w500))),
         ],
       ),
     );
@@ -772,28 +578,29 @@ class _HomePageState extends State<HomePage> {
       bottom: MediaQuery.of(context).size.height * _initialBottomSheetHeight + 20,
       child: Material(
         elevation: 4,
-        shape: CircleBorder(),
+        shape: const CircleBorder(),
         color: Colors.black,
         child: InkWell(
-          customBorder: CircleBorder(),
-          onTap: () {
-            _getUserLocation();
-          },
+          customBorder: const CircleBorder(),
+          onTap: _getUserLocation,
           child: Container(
             width: 60,
             height: 60,
-            decoration: const ShapeDecoration(
-              color: Colors.black,
-              shape: CircleBorder(),
-            ),
-            child: const Icon(
-              Icons.my_location,
-              color: Colors.white,
-              size: 28,
-            ),
+            decoration: const ShapeDecoration(color: Colors.black, shape: CircleBorder()),
+            child: const Icon(Icons.my_location, color: Colors.white, size: 28),
           ),
         ),
       ),
     );
   }
+}
+
+class LatLng {
+  final double latitude;
+  final double longitude;
+
+  LatLng(this.latitude, this.longitude);
+
+  @override
+  String toString() => 'LatLng($latitude, $longitude)';
 }

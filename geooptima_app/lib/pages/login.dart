@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:geooptima_app/pages/otp-verification.dart';
+import 'package:geooptimaapp/pages/otp-verification.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
@@ -204,21 +204,23 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _preloadGoogleImage() {
     final imageProvider = AssetImage('assets/google_logo.png');
-    imageProvider.resolve(ImageConfiguration()).addListener(
-      ImageStreamListener(
-        (info, call) {
-          setState(() {
-            _isGoogleImageLoaded = true;
-          });
-        },
-        onError: (exception, stackTrace) {
-          setState(() {
-            _isGoogleImageLoaded = false;
-          });
-          debugPrint('Google logo image failed to load: $exception');
-        },
-      ),
-    );
+    imageProvider
+        .resolve(ImageConfiguration())
+        .addListener(
+          ImageStreamListener(
+            (info, call) {
+              setState(() {
+                _isGoogleImageLoaded = true;
+              });
+            },
+            onError: (exception, stackTrace) {
+              setState(() {
+                _isGoogleImageLoaded = false;
+              });
+              debugPrint('Google logo image failed to load: $exception');
+            },
+          ),
+        );
   }
 
   void _onFocusChange() {
@@ -250,7 +252,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final phoneNumber = _phoneController.text.trim();
     final validationError = _validatePhoneNumber(phoneNumber);
     if (validationError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validationError)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(validationError)));
       return;
     }
 
@@ -272,22 +276,30 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'])));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(data['message'])));
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => OtpVerificationScreen(phoneNumber: fullPhoneNumber),
+            builder:
+                (context) =>
+                    OtpVerificationScreen(phoneNumber: fullPhoneNumber),
           ),
         );
       } else {
         final error = jsonDecode(response.body)['error'] ?? 'Login failed';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error)));
       }
     } catch (e) {
       setState(() {
         _isLoading = false; // Hide loading indicator on error
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to connect to server: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to connect to server: $e')),
+      );
       debugPrint('Connection error: $e');
     }
   }
@@ -345,7 +357,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           width: screenWidth * 0.2,
                           height: screenWidth * 0.2,
                           color: Colors.black,
-                          child: const Center(child: Text('G', style: TextStyle(color: Colors.white, fontSize: 40))),
+                          child: const Center(
+                            child: Text(
+                              'G',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 40,
+                              ),
+                            ),
+                          ),
                         );
                       },
                     ),
@@ -496,7 +516,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               textAlign: TextAlign.left,
                               decoration: InputDecoration(
                                 border: InputBorder.none,
-                                hintText: _isPhoneFieldFocused ? '' : 'Enter registered number',
+                                hintText:
+                                    _isPhoneFieldFocused
+                                        ? ''
+                                        : 'Enter registered number',
                                 hintStyle: GoogleFonts.montserrat(
                                   color: Colors.black,
                                   fontSize: 16 * widthRatio,
@@ -524,35 +547,43 @@ class _LoginScreenState extends State<LoginScreen> {
                     left: 264 * widthRatio,
                     top: 601 * heightRatio,
                     child: GestureDetector(
-                      onTap: _isLoading ? null : _submitPhoneNumber, // Disable tap when loading
+                      onTap:
+                          _isLoading
+                              ? null
+                              : _submitPhoneNumber, // Disable tap when loading
                       child: Container(
                         width: 110 * widthRatio,
                         height: 51 * heightRatio,
                         decoration: ShapeDecoration(
-                          color: const Color(0x4CD9D9D9), // Match RegisterScreen style
+                          color: const Color(
+                            0x4CD9D9D9,
+                          ), // Match RegisterScreen style
                           shape: RoundedRectangleBorder(
                             side: BorderSide(width: 3 * widthRatio),
-                            borderRadius: BorderRadius.circular(20 * widthRatio),
+                            borderRadius: BorderRadius.circular(
+                              20 * widthRatio,
+                            ),
                           ),
                         ),
                         child: Center(
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.black,
-                                    strokeWidth: 3,
+                          child:
+                              _isLoading
+                                  ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.black,
+                                      strokeWidth: 3,
+                                    ),
+                                  )
+                                  : Text(
+                                    'Submit',
+                                    style: GoogleFonts.montserrat(
+                                      color: Colors.black,
+                                      fontSize: 20 * widthRatio,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
-                                )
-                              : Text(
-                                  'Submit',
-                                  style: GoogleFonts.montserrat(
-                                    color: Colors.black,
-                                    fontSize: 20 * widthRatio,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
                         ),
                       ),
                     ),
@@ -567,7 +598,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => OtpVerificationScreen(phoneNumber: '$_selectedCountryCode${_phoneController.text}'),
+                            builder:
+                                (context) => OtpVerificationScreen(
+                                  phoneNumber:
+                                      '$_selectedCountryCode${_phoneController.text}',
+                                ),
                           ),
                         );
                       },
@@ -581,7 +616,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               width: 3 * widthRatio,
                               color: Colors.black,
                             ),
-                            borderRadius: BorderRadius.circular(30 * widthRatio),
+                            borderRadius: BorderRadius.circular(
+                              30 * widthRatio,
+                            ),
                           ),
                         ),
                         child: Row(
@@ -598,25 +635,29 @@ class _LoginScreenState extends State<LoginScreen> {
                             Spacer(),
                             _isGoogleImageLoaded
                                 ? Container(
-                                    width: 35 * widthRatio,
-                                    height: 35 * heightRatio,
-                                    margin: EdgeInsets.only(right: 10 * widthRatio),
-                                    decoration: BoxDecoration(
-                                      image: DecorationImage(
-                                        image: AssetImage('assets/google_logo.png'),
-                                        fit: BoxFit.contain,
+                                  width: 35 * widthRatio,
+                                  height: 35 * heightRatio,
+                                  margin: EdgeInsets.only(
+                                    right: 10 * widthRatio,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    image: DecorationImage(
+                                      image: AssetImage(
+                                        'assets/google_logo.png',
                                       ),
-                                    ),
-                                  )
-                                : Container(
-                                    width: 70 * widthRatio,
-                                    height: 70 * heightRatio,
-                                    child: Icon(
-                                      Icons.g_mobiledata,
-                                      color: Colors.red,
-                                      size: 40 * widthRatio,
+                                      fit: BoxFit.contain,
                                     ),
                                   ),
+                                )
+                                : Container(
+                                  width: 70 * widthRatio,
+                                  height: 70 * heightRatio,
+                                  child: Icon(
+                                    Icons.g_mobiledata,
+                                    color: Colors.red,
+                                    size: 40 * widthRatio,
+                                  ),
+                                ),
                           ],
                         ),
                       ),
@@ -678,9 +719,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                 width: 1,
                               ),
                             ),
-                            color: _selectedCountryCode == country['code']
-                                ? Colors.grey.withOpacity(0.2)
-                                : Colors.transparent,
+                            color:
+                                _selectedCountryCode == country['code']
+                                    ? Colors.grey.withOpacity(0.2)
+                                    : Colors.transparent,
                           ),
                           child: Row(
                             children: [
@@ -694,9 +736,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                   '${country['name']} (${country['code']})',
                                   style: GoogleFonts.montserrat(
                                     fontSize: 14 * widthRatio,
-                                    fontWeight: _selectedCountryCode == country['code']
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
+                                    fontWeight:
+                                        _selectedCountryCode == country['code']
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
