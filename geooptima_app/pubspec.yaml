@@ -38,6 +38,8 @@ dependencies:
   chewie: ^1.5.0
   cupertino_icons: ^1.0.8
   google_fonts: ^6.2.1
+  permission_handler: ^12.0.0+1
+  flutter_dotenv: ^5.2.1
   
 
 dev_dependencies:
@@ -98,3 +100,4 @@ flutter:
     - assets/mainvideo.mp4
     - assets/poly2.png
     - assets/google_logo.png
+    - assets/.env

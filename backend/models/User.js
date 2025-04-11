@@ -8,15 +8,28 @@ const userSchema = new mongoose.Schema({
   },
   otp: {
     type: String,
-    // required: true,
   },
   otpExpires: {
     type: Date,
-    // required: true,
   },
   isVerified: {
     type: Boolean,
     default: false,
+  },
+  fullName: {
+    type: String,
+  },
+  email: {
+    type: String,
+    lowercase: true,
+    trim: true,
+  },
+  gender: {
+    type: String,
+    enum: ['Male', 'Female', 'Other'],
+  },
+  dateOfBirth: {
+    type: String, // Store as DD/MM/YYYY for simplicity
   },
   createdAt: {
     type: Date,

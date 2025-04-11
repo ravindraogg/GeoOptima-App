@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:geooptima_app/pages/home.dart';
 import 'package:geooptima_app/pages/register.dart';
 import 'package:geooptima_app/pages/login.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
-
-void main() {
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:developer' as developer;
+Future<void> main() async {
   runApp(const MyApp());
+   try {
+    await dotenv.load(fileName: "assets/.env");
+    developer.log("Loaded .env successfully", name: 'Main');
+  } catch (e) {
+    developer.log("Error loading .env: $e", name: 'Main');
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -20,6 +29,7 @@ class MyApp extends StatelessWidget {
         '/': (context) => const ResponsiveScreen(),
         '/register': (context) => const RegisterScreen(),
         '/login': (context) => const LoginScreen(),
+        '/home': (context) => const HomePage(),
       },
     );
   }
@@ -44,7 +54,13 @@ class _ResponsiveScreenState extends State<ResponsiveScreen> {
     _controller.setLooping(true);
     _controller.play();
   }
+Future<void> requestLocationPermission() async {
+  var status = await Permission.location.status;
 
+  if (!status.isGranted) {
+    await Permission.location.request();
+  }
+}
   @override
   void dispose() {
     _controller.dispose();

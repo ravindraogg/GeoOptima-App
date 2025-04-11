@@ -25,64 +25,91 @@ const generateOTPAndSave = async (phoneNumber) => {
 
 // Register - Generate OTP for new user
 router.post('/register', async (req, res) => {
-    const { phoneNumber } = req.body;
-    const otp = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
-  
-    const user = new User({ phoneNumber, otp, otpExpires });
-    await user.save();
-  
-    res.status(200).json({ message: `OTP ${otp} sent to ${phoneNumber}` });
-  });
+  const { phoneNumber } = req.body;
+  if (!phoneNumber) return res.status(400).json({ error: 'Phone number is required' });
 
-  router.post('/login', async (req, res) => {
-    const { phoneNumber } = req.body;
-  
-    try {
-      let user = await User.findOne({ phoneNumber });
-      if (!user) return res.status(404).json({ error: 'User not found' });
-  
-      // Generate and store OTP
-      const otp = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
-      const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
-  
-      user.otp = otp;
-      user.otpExpires = otpExpires;
-      await user.save();
-  
-      res.status(200).json({ message: `OTP ${otp} sent to ${phoneNumber}` });
-    } catch (error) {
-      res.status(500).json({ error: 'Server error' });
+  try {
+    const existingUser = await User.findOne({ phoneNumber });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Phone number already registered' });
     }
-  });
-  router.post('/verify-otp', async (req, res) => {
-    const { phoneNumber, otp, otpExpires } = req.body;
-  
-    try {
-      const user = await User.findOne({ phoneNumber });
-      if (!user) return res.status(404).json({ error: 'User not found' });
-  
-      console.log('Received OTP:', otp);
-      console.log('Stored OTP:', user.otp);
-      console.log('Received otpExpires:', otpExpires);
-      console.log('Stored otpExpires:', user.otpExpires);
-  
-      if (!user.otp || user.otp !== otp) {
-        return res.status(400).json({ error: 'Invalid OTP' });
-      }
-  
-      if (!user.otpExpires || new Date() > user.otpExpires) {
-        return res.status(400).json({ error: 'OTP has expired' });
-      }
-  
-      // On success
-      user.otp = undefined;
-      user.otpExpires = undefined;
-      await user.save();
-  
-      res.status(200).json({ message: 'OTP verified successfully', token: 'your-jwt-token-here' });
-    } catch (error) {
-      res.status(500).json({ error: 'Server error' });
+
+    const { message } = await generateOTPAndSave(phoneNumber);
+    res.status(200).json({ message });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Login - Generate OTP for existing user
+router.post('/login', async (req, res) => {
+  const { phoneNumber } = req.body;
+  if (!phoneNumber) return res.status(400).json({ error: 'Phone number is required' });
+
+  try {
+    const user = await User.findOne({ phoneNumber });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const { message } = await generateOTPAndSave(phoneNumber);
+    res.status(200).json({ message });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Verify OTP
+router.post('/verify-otp', async (req, res) => {
+  const { phoneNumber, otp } = req.body;
+
+  try {
+    const user = await User.findOne({ phoneNumber });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    console.log('Received OTP:', otp);
+    console.log('Stored OTP:', user.otp);
+    console.log('Stored otpExpires:', user.otpExpires);
+
+    if (!user.otp || !(await bcrypt.compare(otp, user.otp))) {
+      return res.status(400).json({ error: 'Invalid OTP' });
     }
-  });
+
+    if (!user.otpExpires || new Date() > user.otpExpires) {
+      return res.status(400).json({ error: 'OTP has expired' });
+    }
+
+    // On success
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    user.isVerified = true;
+    await user.save();
+
+    const token = jwt.sign({ phoneNumber: user.phoneNumber }, 'your-secret-key', { expiresIn: '1h' });
+    res.status(200).json({ message: 'OTP verified successfully', token });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Complete Registration
+router.post('/complete-registration', async (req, res) => {
+  const { phoneNumber, fullName, email, gender, dateOfBirth } = req.body;
+
+  try {
+    let user = await User.findOne({ phoneNumber });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isVerified) return res.status(400).json({ error: 'Phone number not verified' });
+
+    user.fullName = fullName;
+    user.email = email;
+    user.gender = gender;
+    user.dateOfBirth = dateOfBirth;
+    await user.save();
+
+    const token = jwt.sign({ phoneNumber, email }, 'your-secret-key', { expiresIn: '1h' });
+    res.status(200).json({ message: 'Account created successfully', token });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;

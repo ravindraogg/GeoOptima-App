@@ -5,26 +5,40 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
 class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+  final String?
+  verifiedPhoneNumber; // Optional pre-filled phone number from OTP
+
+  const RegisterScreen({super.key, this.verifiedPhoneNumber});
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProviderStateMixin {
+class _RegisterScreenState extends State<RegisterScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _dobController = TextEditingController();
+
   final FocusNode _phoneFocusNode = FocusNode();
   bool _isPhoneFieldFocused = false;
   bool _isCountryDropdownOpen = false;
-  bool _isLoading = false; 
-  
-  // ignore: unused_field
+  bool _isLoading = false;
+  bool _termsAccepted = false;
+  bool _fieldsUnlocked = false;
+  bool _isGoogleImageLoaded = false;
+
+  String _selectedGender = 'Male';
+  final List<String> _genderOptions = ['Male', 'Female', 'Other'];
+  bool _isGenderDropdownOpen = false;
+
   late AnimationController _animationController;
 
   String _selectedCountryCode = '+91';
   String _selectedCountryFlag = '🇮🇳';
 
-final List<Map<String, String>> _countries = [
+  final List<Map<String, String>> _countries = [
     {'name': 'Afghanistan', 'code': '+93', 'flag': '🇦🇫'},
     {'name': 'Albania', 'code': '+355', 'flag': '🇦🇱'},
     {'name': 'Algeria', 'code': '+213', 'flag': '🇩🇿'},
@@ -200,6 +214,52 @@ final List<Map<String, String>> _countries = [
   void initState() {
     super.initState();
     _phoneFocusNode.addListener(_onFocusChange);
+
+    if (widget.verifiedPhoneNumber != null) {
+      final countryCode = _extractCountryCode(widget.verifiedPhoneNumber!);
+      final number = _extractPhoneNumber(
+        widget.verifiedPhoneNumber!,
+        countryCode,
+      );
+      _phoneController.text = number;
+      _fieldsUnlocked = true;
+
+      for (var country in _countries) {
+        if (country['code'] == countryCode) {
+          _selectedCountryCode = country['code']!;
+          _selectedCountryFlag = country['flag']!;
+          break;
+        }
+      }
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_isGoogleImageLoaded) {
+      precacheImage(AssetImage('assets/google_logo.png'), context)
+          .then((_) {
+            if (mounted) {
+              setState(() {
+                _isGoogleImageLoaded = true;
+              });
+            }
+          })
+          .catchError((e) {
+            print('Failed to load Google logo: $e');
+          });
+    }
+  }
+
+  String _extractCountryCode(String fullNumber) {
+    RegExp regExp = RegExp(r'^\+\d{1,4}');
+    final match = regExp.firstMatch(fullNumber);
+    return match?.group(0) ?? '+91';
+  }
+
+  String _extractPhoneNumber(String fullNumber, String countryCode) {
+    return fullNumber.substring(countryCode.length);
   }
 
   void _onFocusChange() {
@@ -209,6 +269,9 @@ final List<Map<String, String>> _countries = [
   @override
   void dispose() {
     _phoneController.dispose();
+    _nameController.dispose();
+    _emailController.dispose();
+    _dobController.dispose();
     _phoneFocusNode.removeListener(_onFocusChange);
     _phoneFocusNode.dispose();
     super.dispose();
@@ -217,78 +280,197 @@ final List<Map<String, String>> _countries = [
   String? _validatePhoneNumber(String value) {
     if (value.isEmpty) return 'Please enter a phone number';
     final numericValue = value.replaceAll(RegExp(r'[^0-9]'), '');
-    if (numericValue.length < 10) return 'Phone number must be at least 10 digits';
+    if (numericValue.length < 10)
+      return 'Phone number must be at least 10 digits';
+    return null;
+  }
+
+  String? _validateFullRegistration() {
+    if (_nameController.text.isEmpty) {
+      return 'Please enter your full name';
+    }
+    if (_emailController.text.isEmpty) {
+      return 'Please enter your email';
+    }
+    if (!_emailController.text.contains('@') ||
+        !_emailController.text.contains('.')) {
+      return 'Please enter a valid email';
+    }
+    if (_dobController.text.isEmpty) {
+      return 'Please enter your date of birth';
+    }
+    if (!_termsAccepted) {
+      return 'Please accept the terms and conditions';
+    }
     return null;
   }
 
   Future<void> _submitPhoneNumber() async {
-  final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text}';
-  final validationError = _validatePhoneNumber(_phoneController.text);
-  if (validationError != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validationError)));
-    return;
-  }
-
-  setState(() {
-    _isLoading = true;
-  });
-
-  try {
-    final response = await http.post(
-      Uri.parse('http://192.168.122.137:5000/api/auth/register'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'phoneNumber': fullPhoneNumber}),
-    );
-
-    setState(() {
-      _isLoading = false;
-    });
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'])));
-      Navigator.push(
+    final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text}';
+    final validationError = _validatePhoneNumber(_phoneController.text);
+    if (validationError != null) {
+      ScaffoldMessenger.of(
         context,
-        MaterialPageRoute(builder: (context) => OtpVerificationScreen(phoneNumber: fullPhoneNumber)),
-      );
-    } else {
-      String errorMessage = 'Unknown error occurred';
-      
-      try {
-        final errorData = jsonDecode(response.body);
-        errorMessage = errorData['error'] ?? errorMessage;
-      } catch (e) {
-        if (response.body.toLowerCase().contains('<!doctype') || 
-            response.body.toLowerCase().contains('<html')) {
-          if (response.body.toLowerCase().contains('duplicate')) {
-            errorMessage = 'This phone number is already registered';
-          } else {
-            errorMessage = 'Registration failed. Please try again.';
-          }
-        } else {
-          errorMessage = response.body;
-        }
-      }
-      
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage)));
+      ).showSnackBar(SnackBar(content: Text(validationError)));
+      return;
     }
-  } catch (e) {
+
     setState(() {
-      _isLoading = false;
+      _isLoading = true;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Failed to connect to server: ${e.toString()}'))
-    );
-    debugPrint('Connection error: $e');
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://192.168.122.137:5000/api/auth/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'phoneNumber': fullPhoneNumber}),
+      );
+
+      setState(() {
+        _isLoading = false;
+      });
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(data['message'])));
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder:
+                (context) => OtpVerificationScreen(
+                  phoneNumber: fullPhoneNumber,
+                  isFromRegister: true,
+                ),
+          ),
+        );
+
+        if (result != null && result['verified'] == true) {
+          setState(() {
+            _fieldsUnlocked = true;
+            _phoneController.text = _extractPhoneNumber(
+              fullPhoneNumber,
+              _selectedCountryCode,
+            );
+          });
+        }
+      } else {
+        String errorMessage = 'Unknown error occurred';
+        try {
+          final errorData = jsonDecode(response.body);
+          errorMessage = errorData['error'] ?? errorMessage;
+        } catch (e) {
+          if (response.body.toLowerCase().contains('<!doctype') ||
+              response.body.toLowerCase().contains('<html')) {
+            if (response.body.toLowerCase().contains('duplicate')) {
+              errorMessage = 'This phone number is already registered';
+            } else {
+              errorMessage = 'Registration failed. Please try again.';
+            }
+          } else {
+            errorMessage = response.body;
+          }
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(errorMessage)));
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to connect to server: ${e.toString()}')),
+      );
+      debugPrint('Connection error: $e');
+    }
   }
-}
+
+  Future<void> _submitFullRegistration() async {
+    final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text}';
+    final validationError = _validateFullRegistration();
+
+    if (validationError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(validationError)));
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://192.168.122.137:5000/api/auth/complete-registration'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'phoneNumber': fullPhoneNumber,
+          'fullName': _nameController.text,
+          'email': _emailController.text,
+          'gender': _selectedGender,
+          'dateOfBirth': _dobController.text,
+        }),
+      );
+
+      setState(() {
+        _isLoading = false;
+      });
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Account created successfully!')),
+        );
+
+        if (data['token'] != null) {
+          debugPrint('Token received: ${data['token']}');
+        }
+
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        String errorMessage = 'Registration failed';
+
+        try {
+          final errorData = jsonDecode(response.body);
+          errorMessage = errorData['error'] ?? errorMessage;
+        } catch (e) {
+          errorMessage = 'Registration failed. Please try again.';
+        }
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(errorMessage)));
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to connect to server: ${e.toString()}')),
+      );
+      debugPrint('Registration error: $e');
+    }
+  }
 
   void _toggleCountryDropdown() {
     setState(() {
       _isCountryDropdownOpen = !_isCountryDropdownOpen;
+      _isGenderDropdownOpen = false;
       if (_isCountryDropdownOpen) _phoneFocusNode.unfocus();
     });
     debugPrint('Dropdown toggled: $_isCountryDropdownOpen');
+  }
+
+  void _toggleGenderDropdown() {
+    if (!_fieldsUnlocked) return;
+
+    setState(() {
+      _isGenderDropdownOpen = !_isGenderDropdownOpen;
+      _isCountryDropdownOpen = false;
+    });
   }
 
   void _selectCountry(Map<String, String> country) {
@@ -300,6 +482,31 @@ final List<Map<String, String>> _countries = [
     debugPrint('Country selected: ${country['name']} (${country['code']})');
   }
 
+  void _selectGender(String gender) {
+    setState(() {
+      _selectedGender = gender;
+      _isGenderDropdownOpen = false;
+    });
+  }
+
+  Future<void> _selectDate() async {
+    if (!_fieldsUnlocked) return;
+
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().subtract(const Duration(days: 6570)),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+    );
+
+    if (picked != null) {
+      setState(() {
+        _dobController.text =
+            "${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}";
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -309,376 +516,670 @@ final List<Map<String, String>> _countries = [
 
     return SafeArea(
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         backgroundColor: Colors.white,
         body: Stack(
           children: [
-            Container(
-              width: screenWidth,
-              height: screenHeight,
-              clipBehavior: Clip.antiAlias,
-              decoration: const BoxDecoration(color: Colors.white),
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: -4,
-                    top: 0,
-                    child: Image.asset(
-                      'assets/poly2.png',
-                      width: screenWidth * 0.2,
-                      height: screenWidth * 0.2,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          width: screenWidth * 0.2,
-                          height: screenWidth * 0.2,
-                          color: Colors.red,
-                          child: const Center(child: Text('Image Error')),
-                        );
-                      },
+            // Decorative background elements (restored to original positions)
+            Positioned(
+              left: -4, // Original position
+              top: 0, // Original position
+              child: Image.asset(
+                'assets/poly2.png',
+                width: screenWidth * 0.2,
+                height: screenWidth * 0.2,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    width: screenWidth * 0.2,
+                    height: screenWidth * 0.2,
+                    color: Colors.red,
+                    child: const Center(child: Text('Image Error')),
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              left: screenWidth * 0.00, // Original position
+              top:
+                  screenHeight *
+                  -0.02, // Original position (slightly off-screen, but intentional)
+              child: GestureDetector(
+                onTap: () {
+                  debugPrint('Back button tapped');
+                  Navigator.pop(context);
+                },
+                child: Container(
+                  padding: EdgeInsets.all(10 * widthRatio),
+                  child: Text(
+                    'G',
+                    style: GoogleFonts.montserrat(
+                      color: Colors.white,
+                      fontSize: screenWidth * 0.16,
+                      fontWeight: FontWeight.w400,
                     ),
                   ),
-                  Positioned(
-                    left: screenWidth * 0.00,
-                    top: screenHeight * -0.02,
-                    child: GestureDetector(
-                      onTap: () {
-                        debugPrint('Back button tapped');
-                        Navigator.pop(context);
-                      },
-                      child: Container(
-                        padding: EdgeInsets.all(10 * widthRatio),
-                        child: Text(
-                          'G',
-                          style: GoogleFonts.montserrat(
-                            color: Colors.white,
-                            fontSize: screenWidth * 0.16,
-                            fontWeight: FontWeight.w400,
-                          ),
-                        ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 361.93 * widthRatio, // Original position
+              top:
+                  -206.18 *
+                  heightRatio, // Original position (extends above screen)
+              child: Transform(
+                transform: Matrix4.identity()..rotateZ(1.16),
+                child: Container(
+                  width: 511 * widthRatio,
+                  height: 297 * heightRatio,
+                  decoration: ShapeDecoration(
+                    color: Colors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(50 * widthRatio),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 246 * widthRatio, // Original position
+              top:
+                  -22.14 *
+                  heightRatio, // Original position (slightly above screen)
+              child: Transform(
+                transform: Matrix4.identity()..rotateZ(-0.44),
+                child: Container(
+                  width: 131.39 * widthRatio,
+                  height: 240.08 * heightRatio,
+                  decoration: ShapeDecoration(
+                    color: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.only(
+                        topRight: Radius.circular(40 * widthRatio),
+                        bottomLeft: Radius.circular(40 * widthRatio),
+                        bottomRight: Radius.circular(40 * widthRatio),
                       ),
                     ),
                   ),
-                  Positioned(
-                    left: 361.93 * widthRatio,
-                    top: -206.18 * heightRatio,
-                    child: Transform(
-                      transform: Matrix4.identity()..rotateZ(1.16),
-                      child: Container(
-                        width: 511 * widthRatio,
-                        height: 297 * heightRatio,
-                        decoration: ShapeDecoration(
-                          color: Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(50 * widthRatio),
-                          ),
-                        ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 21 * widthRatio, 
+              top: 170 * heightRatio, 
+              child: Text(
+                'Be a\nOptima',
+                textAlign: TextAlign.left,
+                style: GoogleFonts.montserrat(
+                  color: Colors.black,
+                  fontSize: 50 * widthRatio,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ),
+            // Main content
+            SingleChildScrollView(
+              child: Container(
+                height: screenHeight, // Bounded height to resolve flex issue
+                padding: EdgeInsets.symmetric(
+                  horizontal: 27 * widthRatio,
+                  vertical: 20 * heightRatio,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: (260 + 50) * heightRatio,
+                    ), // Increased to avoid overlap with "Be a Optima"
+                    Text(
+                      _fieldsUnlocked
+                          ? 'Fill the below details'
+                          : 'Register yourself',
+                      style: GoogleFonts.montserrat(
+                        color: Colors.black,
+                        fontSize: 24 * widthRatio,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  Positioned(
-                    left: 246 * widthRatio,
-                    top: -22.14 * heightRatio,
-                    child: Transform(
-                      transform: Matrix4.identity()..rotateZ(-0.44),
-                      child: Container(
-                        width: 131.39 * widthRatio,
-                        height: 240.08 * heightRatio,
+                    SizedBox(height: 20 * heightRatio),
+                    if (!_fieldsUnlocked) ...[
+                      // Phone input
+                      Container(
+                        width: 347 * widthRatio,
+                        height: 67 * heightRatio,
                         decoration: ShapeDecoration(
-                          color: Colors.white,
+                          color: const Color(0xFFD9D9D9),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.only(
-                              topRight: Radius.circular(40 * widthRatio),
-                              bottomLeft: Radius.circular(40 * widthRatio),
-                              bottomRight: Radius.circular(40 * widthRatio),
+                            borderRadius: BorderRadius.circular(
+                              30 * widthRatio,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            GestureDetector(
+                              onTap: _toggleCountryDropdown,
+                              child: Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 10 * widthRatio,
+                                  vertical: 15 * heightRatio,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      _selectedCountryFlag,
+                                      style: TextStyle(
+                                        fontSize: 20 * widthRatio,
+                                      ),
+                                    ),
+                                    SizedBox(width: 5 * widthRatio),
+                                    Text(
+                                      _selectedCountryCode,
+                                      style: GoogleFonts.montserrat(
+                                        color: Colors.black,
+                                        fontSize: 16 * widthRatio,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    Icon(
+                                      _isCountryDropdownOpen
+                                          ? Icons.arrow_drop_up
+                                          : Icons.arrow_drop_down,
+                                      color: Colors.black,
+                                      size: 24 * widthRatio,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            Container(
+                              height: 30 * heightRatio,
+                              width: 1 * widthRatio,
+                              color: Colors.grey[600],
+                              margin: EdgeInsets.symmetric(
+                                vertical: 18.5 * heightRatio,
+                              ),
+                            ),
+                            Expanded(
+                              child: TextField(
+                                controller: _phoneController,
+                                focusNode: _phoneFocusNode,
+                                keyboardType: TextInputType.phone,
+                                decoration: InputDecoration(
+                                  border: InputBorder.none,
+                                  hintText:
+                                      _isPhoneFieldFocused
+                                          ? ''
+                                          : 'Enter your number',
+                                  hintStyle: GoogleFonts.montserrat(
+                                    color: Colors.grey[600],
+                                    fontSize: 16 * widthRatio,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 15 * widthRatio,
+                                    vertical: 20 * heightRatio,
+                                  ),
+                                ),
+                                style: GoogleFonts.montserrat(
+                                  color: Colors.black,
+                                  fontSize: 18 * widthRatio,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                onSubmitted: (_) => _submitPhoneNumber(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 30 * heightRatio),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          GestureDetector(
+                            onTap: _isLoading ? null : _submitPhoneNumber,
+                            child: Container(
+                              width: 110 * widthRatio,
+                              height: 51 * heightRatio,
+                              decoration: ShapeDecoration(
+                                color: const Color(0x4CD9D9D9),
+                                shape: RoundedRectangleBorder(
+                                  side: BorderSide(width: 3 * widthRatio),
+                                  borderRadius: BorderRadius.circular(
+                                    30 * widthRatio,
+                                  ),
+                                ),
+                              ),
+                              child: Center(
+                                child:
+                                    _isLoading
+                                        ? const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.black,
+                                            strokeWidth: 3,
+                                          ),
+                                        )
+                                        : Text(
+                                          'Submit',
+                                          style: GoogleFonts.montserrat(
+                                            color: Colors.black,
+                                            fontSize: 20 * widthRatio,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Push Google button to bottom
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: EdgeInsets.only(bottom: 40 * heightRatio),
+                            child: GestureDetector(
+                              onTap: () {
+                                final phoneError = _validatePhoneNumber(
+                                  _phoneController.text,
+                                );
+                                if (phoneError != null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(phoneError)),
+                                  );
+                                  return;
+                                }
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) => OtpVerificationScreen(
+                                          phoneNumber:
+                                              '$_selectedCountryCode${_phoneController.text}',
+                                        ),
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                width: 280 * widthRatio,
+                                height: 67 * heightRatio,
+                                decoration: ShapeDecoration(
+                                  color: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    side: BorderSide(
+                                      width: 3 * widthRatio,
+                                      color: Colors.black,
+                                    ),
+                                    borderRadius: BorderRadius.circular(
+                                      30 * widthRatio,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    _isGoogleImageLoaded
+                                        ? Container(
+                                          width: 35 * widthRatio,
+                                          height: 35 * heightRatio,
+                                          margin: EdgeInsets.only(
+                                            left: 15 * widthRatio,
+                                            right: 10 * widthRatio,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            image: DecorationImage(
+                                              image: AssetImage(
+                                                'assets/google_logo.png',
+                                              ),
+                                              fit: BoxFit.contain,
+                                            ),
+                                          ),
+                                        )
+                                        : Icon(
+                                          Icons.g_mobiledata,
+                                          size: 40 * widthRatio,
+                                          color: Colors.red,
+                                        ),
+                                    Text(
+                                      'Sign in with Google',
+                                      style: GoogleFonts.montserrat(
+                                        color: Colors.black,
+                                        fontSize: 20 * widthRatio,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 19 * widthRatio,
-                    top: 195 * heightRatio,
-                    child: SizedBox(
-                      width: 269 * widthRatio,
-                      height: 156 * heightRatio,
-                      child: Text(
-                        'Be a\nOptima',
-                        textAlign: TextAlign.left,
-                        style: GoogleFonts.montserrat(
-                          color: Colors.black,
-                          fontSize: 50 * widthRatio,
-                          fontWeight: FontWeight.w400,
+                    ] else ...[
+                      // Full registration fields
+                      Container(
+                        width: 347 * widthRatio,
+                        height: 60 * heightRatio,
+                        decoration: ShapeDecoration(
+                          color: const Color(0xFFD9D9D9),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              30 * widthRatio,
+                            ),
+                          ),
+                        ),
+                        child: TextField(
+                          controller: _nameController,
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'Enter your full name',
+                            hintStyle: GoogleFonts.montserrat(
+                              color: Colors.grey[600],
+                              fontSize: 16 * widthRatio,
+                              fontWeight: FontWeight.w400,
+                            ),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 25 * widthRatio,
+                              vertical: 18 * heightRatio,
+                            ),
+                          ),
+                          style: GoogleFonts.montserrat(
+                            color: Colors.black,
+                            fontSize: 16 * widthRatio,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 27 * widthRatio,
-                    top: 437 * heightRatio,
-                    child: Text(
-                      'Register yourself',
-                      style: GoogleFonts.montserrat(
-                        color: Colors.black,
-                        fontSize: 20 * widthRatio,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 27 * widthRatio,
-                    top: 477 * heightRatio,
-                    child: Container(
-                      width: 347 * widthRatio,
-                      height: 67 * heightRatio,
-                      decoration: ShapeDecoration(
-                        color: const Color(0xFFD9D9D9),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30 * widthRatio),
+                      SizedBox(height: 20 * heightRatio),
+                      Container(
+                        width: 347 * widthRatio,
+                        height: 60 * heightRatio,
+                        decoration: ShapeDecoration(
+                          color: const Color(0xFFD9D9D9),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              30 * widthRatio,
+                            ),
+                          ),
+                        ),
+                        child: TextField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'example@gmail.com',
+                            hintStyle: GoogleFonts.montserrat(
+                              color: Colors.grey[600],
+                              fontSize: 16 * widthRatio,
+                              fontWeight: FontWeight.w400,
+                            ),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 25 * widthRatio,
+                              vertical: 18 * heightRatio,
+                            ),
+                          ),
+                          style: GoogleFonts.montserrat(
+                            color: Colors.black,
+                            fontSize: 16 * widthRatio,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          GestureDetector(
-                            onTap: _toggleCountryDropdown,
-                            child: Container(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: 10 * widthRatio,
-                                vertical: 15 * heightRatio,
+                      SizedBox(height: 20 * heightRatio),
+                      GestureDetector(
+                        onTap: _toggleGenderDropdown,
+                        child: Container(
+                          width: 347 * widthRatio,
+                          height: 60 * heightRatio,
+                          decoration: ShapeDecoration(
+                            color: const Color(0xFFD9D9D9),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                30 * widthRatio,
                               ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    _selectedCountryFlag,
-                                    style: TextStyle(fontSize: 20 * widthRatio),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 25 * widthRatio,
+                                    vertical: 18 * heightRatio,
                                   ),
-                                  SizedBox(width: 5 * widthRatio),
-                                  Text(
-                                    _selectedCountryCode,
+                                  child: Text(
+                                    _selectedGender,
                                     style: GoogleFonts.montserrat(
                                       color: Colors.black,
                                       fontSize: 16 * widthRatio,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                                  Icon(
-                                    _isCountryDropdownOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-                                    color: Colors.black,
-                                    size: 24 * widthRatio,
-                                  ),
-                                ],
+                                ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  right: 15 * widthRatio,
+                                ),
+                                child: Icon(
+                                  _isGenderDropdownOpen
+                                      ? Icons.arrow_drop_up
+                                      : Icons.arrow_drop_down,
+                                  size: 28 * widthRatio,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 20 * heightRatio),
+                      GestureDetector(
+                        onTap: _selectDate,
+                        child: Container(
+                          width: 347 * widthRatio,
+                          height: 60 * heightRatio,
+                          decoration: ShapeDecoration(
+                            color: const Color(0xFFD9D9D9),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                30 * widthRatio,
                               ),
                             ),
                           ),
-                          Container(
-                            height: 30 * heightRatio,
-                            width: 1 * widthRatio,
-                            color: Colors.grey[600],
-                            margin: EdgeInsets.symmetric(vertical: 18.5 * heightRatio),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 25 * widthRatio,
+                                    vertical: 18 * heightRatio,
+                                  ),
+                                  child: Text(
+                                    _dobController.text.isEmpty
+                                        ? 'DD/MM/YYYY'
+                                        : _dobController.text,
+                                    style: GoogleFonts.montserrat(
+                                      color:
+                                          _dobController.text.isEmpty
+                                              ? Colors.grey[600]
+                                              : Colors.black,
+                                      fontSize: 16 * widthRatio,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  right: 15 * widthRatio,
+                                ),
+                                child: Icon(
+                                  Icons.calendar_today,
+                                  size: 22 * widthRatio,
+                                ),
+                              ),
+                            ],
                           ),
-                          Expanded(
-                            child: TextField(
-                              controller: _phoneController,
-                              focusNode: _phoneFocusNode,
-                              keyboardType: TextInputType.phone,
-                              textAlign: TextAlign.left,
-                              decoration: InputDecoration(
-                                border: InputBorder.none,
-                                hintText: _isPhoneFieldFocused ? '' : 'Phone number',
-                                hintStyle: GoogleFonts.montserrat(
-                                  color: Colors.grey[600],
-                                  fontSize: 16 * widthRatio,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 15 * widthRatio,
-                                  vertical: 20 * heightRatio,
-                                ),
-                              ),
-                              style: GoogleFonts.montserrat(
-                                color: Colors.black,
-                                fontSize: 18 * widthRatio,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              onSubmitted: (_) => _submitPhoneNumber(),
+                        ),
+                      ),
+                      SizedBox(height: 20 * heightRatio),
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: _termsAccepted,
+                            onChanged: (value) {
+                              setState(() {
+                                _termsAccepted = value ?? false;
+                              });
+                            },
+                          ),
+                          Text(
+                            'Terms & conditions',
+                            style: GoogleFonts.montserrat(
+                              color: Colors.black,
+                              fontSize: 14 * widthRatio,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 264 * widthRatio,
-                    top: 601 * heightRatio,
-                    child: GestureDetector(
-                      onTap: _isLoading ? null : _submitPhoneNumber, 
-                      child: Container(
-                        width: 110 * widthRatio,
-                        height: 51 * heightRatio,
-                        decoration: ShapeDecoration(
-                          color: const Color(0x4CD9D9D9),
-                          shape: RoundedRectangleBorder(
-                            side: BorderSide(width: 3 * widthRatio),
-                            borderRadius: BorderRadius.circular(20 * widthRatio),
-                          ),
-                        ),
-                        child: Center(
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.black,
-                                    strokeWidth: 3,
-                                  ),
-                                )
-                              : Text(
-                                  'Submit',
-                                  style: GoogleFonts.montserrat(
-                                    color: Colors.black,
-                                    fontSize: 20 * widthRatio,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                      SizedBox(height: 20 * heightRatio),
+                      Center(
+                        child: GestureDetector(
+                          onTap: _isLoading ? null : _submitFullRegistration,
+                          child: Container(
+                            width: 180 * widthRatio,
+                            height: 48 * heightRatio,
+                            decoration: ShapeDecoration(
+                              color: const Color(0x4CD9D9D9),
+                              shape: RoundedRectangleBorder(
+                                side: BorderSide(width: 3 * widthRatio),
+                                borderRadius: BorderRadius.circular(
+                                  30 * widthRatio,
                                 ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 27 * widthRatio,
-                    top: 720 * heightRatio,
-                    child: GestureDetector(
-                      onTap: _isLoading 
-                          ? null 
-                          : () {
-                              debugPrint('Google sign-in requested');
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (context) => const OtpVerificationScreen(phoneNumber: '+91')),
-                              );
-                            },
-                      child: Container(
-                        width: 347 * widthRatio,
-                        height: 67 * heightRatio,
-                        decoration: ShapeDecoration(
-                          color: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            side: BorderSide(
-                              width: 2 * widthRatio,
-                              color: Colors.black,
+                              ),
                             ),
-                            borderRadius: BorderRadius.circular(30 * widthRatio),
+                            child: Center(
+                              child:
+                                  _isLoading
+                                      ? const SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          color: Colors.black,
+                                          strokeWidth: 3,
+                                        ),
+                                      )
+                                      : Text(
+                                        'Create Account',
+                                        style: GoogleFonts.montserrat(
+                                          color: Colors.black,
+                                          fontSize: 18 * widthRatio,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                            ),
                           ),
                         ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 35 * widthRatio,
-                              height: 35 * heightRatio,
-                              margin: EdgeInsets.only(right: 10 * widthRatio),
-                              child: Image.asset(
-                                'assets/google_logo.png',
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Icon(
-                                    Icons.g_mobiledata,
-                                    color: Colors.red,
-                                    size: 25 * widthRatio,
-                                  );
-                                },
-                              ),
-                            ),
-                            Text(
-                              'Sign in with Google',
-                              style: GoogleFonts.montserrat(
-                                color: Colors.black,
-                                fontSize: 18 * widthRatio,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
-                    ),
-                  ),
-                ],
+                    ],
+                  ],
+                ),
               ),
             ),
-            if (_isCountryDropdownOpen)
-              GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () {
-                  setState(() => _isCountryDropdownOpen = false);
-                  debugPrint('Tapped outside to close dropdown');
-                },
-                child: Container(color: Colors.transparent),
-              ),
+            // Country dropdown (adjusted position to match original intent)
             if (_isCountryDropdownOpen)
               Positioned(
                 left: 27 * widthRatio,
-                top: (477 + 67) * heightRatio,
+                top:
+                    447 *
+                    heightRatio, // Matches original placement below phone input
                 child: Container(
-                  width: 200 * widthRatio,
-                  height: 250 * heightRatio,
+                  width: 347 * widthRatio,
+                  height: 300 * heightRatio,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(15 * widthRatio),
+                    borderRadius: BorderRadius.circular(10 * widthRatio),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.2),
                         blurRadius: 10,
-                        offset: const Offset(0, 5),
+                        offset: const Offset(0, 3),
                       ),
                     ],
                   ),
                   child: ListView.builder(
-                    physics: const BouncingScrollPhysics(),
                     itemCount: _countries.length,
                     itemBuilder: (context, index) {
                       final country = _countries[index];
-                      return GestureDetector(
-                        onTap: () {
-                          _selectCountry(country);
-                          debugPrint('Tapped country: ${country['name']}');
-                        },
+                      return InkWell(
+                        onTap: () => _selectCountry(country),
                         child: Container(
                           padding: EdgeInsets.symmetric(
-                            vertical: 10 * heightRatio,
                             horizontal: 15 * widthRatio,
-                          ),
-                          decoration: BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(
-                                color: Colors.grey.withOpacity(0.3),
-                                width: 1,
-                              ),
-                            ),
-                            color: _selectedCountryCode == country['code']
-                                ? Colors.grey.withOpacity(0.2)
-                                : Colors.transparent,
+                            vertical: 10 * heightRatio,
                           ),
                           child: Row(
                             children: [
                               Text(
                                 country['flag']!,
-                                style: TextStyle(fontSize: 20 * widthRatio),
+                                style: TextStyle(fontSize: 24 * widthRatio),
                               ),
                               SizedBox(width: 10 * widthRatio),
-                              Expanded(
-                                child: Text(
-                                  '${country['name']} (${country['code']})',
-                                  style: GoogleFonts.montserrat(
-                                    fontSize: 14 * widthRatio,
-                                    fontWeight: _selectedCountryCode == country['code']
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
+                              Text(
+                                '${country['code']} (${country['name']})',
+                                style: GoogleFonts.montserrat(
+                                  fontSize: 16 * widthRatio,
                                 ),
                               ),
                             ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            // Gender dropdown (adjusted position to match original intent)
+            if (_isGenderDropdownOpen)
+              Positioned(
+                left: 27 * widthRatio,
+                top:
+                    650 *
+                    heightRatio, // Matches original placement below gender field
+                child: Container(
+                  width: 347 * widthRatio,
+                  height: 150 * heightRatio,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10 * widthRatio),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: ListView.builder(
+                    itemCount: _genderOptions.length,
+                    itemBuilder: (context, index) {
+                      final gender = _genderOptions[index];
+                      return InkWell(
+                        onTap: () => _selectGender(gender),
+                        child: Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 25 * widthRatio,
+                            vertical: 15 * heightRatio,
+                          ),
+                          child: Text(
+                            gender,
+                            style: GoogleFonts.montserrat(
+                              fontSize: 18 * widthRatio,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       );

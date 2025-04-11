@@ -5,8 +5,12 @@ import 'package:http/http.dart' as http;
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phoneNumber;
-
-  const OtpVerificationScreen({super.key, required this.phoneNumber});
+  final bool isFromRegister; // Indicates if the screen is called from register.dart
+  const OtpVerificationScreen({
+    super.key,
+    required this.phoneNumber,
+    this.isFromRegister = false,
+  });
 
   @override
   State<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
@@ -15,11 +19,17 @@ class OtpVerificationScreen extends StatefulWidget {
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   final List<TextEditingController> _otpControllers = List.generate(4, (index) => TextEditingController());
   final List<FocusNode> _otpFocusNodes = List.generate(4, (index) => FocusNode());
-  bool _isLoading = false; // Added loading state
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
+    // Auto-focus on the first OTP field
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_otpFocusNodes.isNotEmpty) {
+        FocusScope.of(context).requestFocus(_otpFocusNodes[0]);
+      }
+    });
   }
 
   @override
@@ -33,12 +43,14 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
   Future<void> _verifyOtp() async {
     if (completeOtp.length != 4) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter complete OTP code')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter complete OTP code')),
+      );
       return;
     }
 
     setState(() {
-      _isLoading = true; // Start loading
+      _isLoading = true;
     });
 
     try {
@@ -48,31 +60,39 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         body: jsonEncode({
           'phoneNumber': widget.phoneNumber,
           'otp': completeOtp,
-          'otpExpires': DateTime.now().toIso8601String(), // Temporary dummy value
         }),
       );
 
       setState(() {
-        _isLoading = false; // Stop loading
+        _isLoading = false;
       });
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'])));
-        debugPrint('Token: ${data['token']}');
-        // Navigate to next screen
-        // Example: Navigator.pushReplacementNamed(context, '/home');
+        final String token = data['token'] ?? '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'])),
+        );
+
+        if (widget.isFromRegister) {
+          // Return to register.dart with verification result
+          Navigator.pop(context, {'verified': true, 'token': token});
+        } else {
+          // Redirect to home screen for login flow
+          Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+        }
       } else {
         final error = jsonDecode(response.body)['error'] ?? 'Verification failed';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
       }
     } catch (e) {
       setState(() {
-        _isLoading = false; // Stop loading on error
+        _isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to verify OTP: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to verify OTP: $e')),
+      );
       debugPrint('Verification error details: $e');
-      debugPrint('Response body or exception: ${e.toString()}');
     }
   }
 
@@ -93,6 +113,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           decoration: const BoxDecoration(color: Colors.white),
           child: Stack(
             children: [
+              // Background Polygon
               Positioned(
                 left: -4,
                 top: 0,
@@ -111,6 +132,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   },
                 ),
               ),
+              // Back Button (G)
               Positioned(
                 left: screenWidth * 0.00,
                 top: screenHeight * -0.02,
@@ -132,6 +154,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // Rotated Black Shape
               Positioned(
                 left: 361.93 * widthRatio,
                 top: -206.18 * heightRatio,
@@ -149,6 +172,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // Rotated White Shape
               Positioned(
                 left: 246 * widthRatio,
                 top: -22.14 * heightRatio,
@@ -170,6 +194,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // Title Text
               Positioned(
                 left: 19 * widthRatio,
                 top: 195 * heightRatio,
@@ -186,6 +211,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // OTP Instruction
               Positioned(
                 left: 27 * widthRatio,
                 top: 437 * heightRatio,
@@ -198,10 +224,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // OTP Input Fields
               Positioned(
                 left: 27 * widthRatio,
                 top: 477 * heightRatio,
-                child: Container(
+                child: SizedBox(
                   width: 347 * widthRatio,
                   height: 67 * heightRatio,
                   child: Row(
@@ -248,19 +275,20 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // Verify Button
               Positioned(
                 left: 264 * widthRatio,
                 top: 601 * heightRatio,
                 child: GestureDetector(
-                  onTap: _isLoading ? null : _verifyOtp, // Disable tap when loading
+                  onTap: _isLoading ? null : _verifyOtp,
                   child: Container(
                     width: 110 * widthRatio,
                     height: 51 * heightRatio,
                     decoration: ShapeDecoration(
-                      color: const Color(0x4CD9D9D9), // Match RegisterScreen style
+                      color: const Color(0x4CD9D9D9),
                       shape: RoundedRectangleBorder(
                         side: BorderSide(width: 3 * widthRatio),
-                        borderRadius: BorderRadius.circular(20 * widthRatio), // Match RegisterScreen
+                        borderRadius: BorderRadius.circular(20 * widthRatio),
                       ),
                     ),
                     child: Center(
@@ -285,6 +313,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // Resend Code Option
               Positioned(
                 left: 27 * widthRatio,
                 top: 615 * heightRatio,
@@ -294,6 +323,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('OTP code resent')),
                     );
+                    // TODO: Implement actual resend logic with API call
                   },
                   child: Text(
                     'Resend code',
@@ -306,6 +336,18 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
+              // Loading Overlay
+              if (_isLoading)
+                Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  color: Colors.black.withOpacity(0.3),
+                  child: const Center(
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
