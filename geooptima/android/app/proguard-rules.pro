@@ -1,0 +1,3 @@
+-keep class com.ola.** { *; }
+-keep class com.ola.mapsdk.** { *; }
+-dontwarn com.ola.**
