@@ -6,8 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phoneNumber;
-  final bool
-  isFromRegister; // Indicates if the screen is called from register.dart
+  final bool isFromRegister; // Indicates if the screen is called from register.dart
   const OtpVerificationScreen({
     super.key,
     required this.phoneNumber,
@@ -60,13 +59,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     await prefs.setBool('isLoggedIn', true);
     await prefs.setString('authToken', token);
     await prefs.setString('phoneNumber', widget.phoneNumber);
-    debugPrint('Login state saved: isLoggedIn=true, token=$token');
+    debugPrint('Login state saved: isLoggedIn=true, token=$token, phoneNumber=${widget.phoneNumber}');
   }
 
   Future<void> _verifyOtp() async {
     if (completeOtp.length != 4) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter complete OTP code')),
+        const SnackBar(content: Text('Please enter a complete 4-digit OTP code')),
       );
       return;
     }
@@ -95,34 +94,40 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         final data = jsonDecode(response.body);
         final String token = data['token'] ?? '';
 
-        // Save login state when verification is successful
+        if (token.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Verification failed: No token received')),
+          );
+          return;
+        }
+
+        // Save login state for both login and registration flows
         await _saveLoginState(token);
 
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(data['message'])));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'OTP verified successfully')),
+        );
 
         if (widget.isFromRegister) {
-          // Return to register.dart with verification result
+          // Return to register.dart with verification result and token
           Navigator.pop(context, {'verified': true, 'token': token});
         } else {
           // Redirect to home screen for login flow
           Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
         }
       } else {
-        final error =
-            jsonDecode(response.body)['error'] ?? 'Verification failed';
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error)));
+        final error = jsonDecode(response.body)['error'] ?? 'Verification failed';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
+        );
       }
     } catch (e) {
       setState(() {
         _isLoading = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to verify OTP: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to verify OTP: $e')),
+      );
       debugPrint('Verification error details: $e');
     }
   }
@@ -281,13 +286,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                           focusNode: _otpFocusNodes[index],
                           onChanged: (value) {
                             if (value.length == 1 && index < 3) {
-                              FocusScope.of(
-                                context,
-                              ).requestFocus(_otpFocusNodes[index + 1]);
+                              FocusScope.of(context).requestFocus(_otpFocusNodes[index + 1]);
                             } else if (value.isEmpty && index > 0) {
-                              FocusScope.of(
-                                context,
-                              ).requestFocus(_otpFocusNodes[index - 1]);
+                              FocusScope.of(context).requestFocus(_otpFocusNodes[index - 1]);
                             }
                           },
                           keyboardType: TextInputType.number,
@@ -329,24 +330,23 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                       ),
                     ),
                     child: Center(
-                      child:
-                          _isLoading
-                              ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.black,
-                                  strokeWidth: 3,
-                                ),
-                              )
-                              : Text(
-                                'Verify',
-                                style: GoogleFonts.montserrat(
-                                  color: Colors.black,
-                                  fontSize: 20 * widthRatio,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.black,
+                                strokeWidth: 3,
                               ),
+                            )
+                          : Text(
+                              'Verify',
+                              style: GoogleFonts.montserrat(
+                                color: Colors.black,
+                                fontSize: 20 * widthRatio,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                     ),
                   ),
                 ),
@@ -374,7 +374,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                 ),
               ),
-              // Loading Overlay
               if (_isLoading)
                 Container(
                   width: double.infinity,

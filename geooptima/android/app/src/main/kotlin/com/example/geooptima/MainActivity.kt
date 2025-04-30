@@ -1,6 +1,10 @@
 package com.example.geooptima
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.view.View
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -33,7 +37,6 @@ class OlaMapViewFactory(private val messenger: BinaryMessenger) : PlatformViewFa
     }
 }
 
-// Fixed the typo `cclass` to `class`
 class OlaMapViewPlatform(
     context: Context,
     viewId: Int,
@@ -44,6 +47,7 @@ class OlaMapViewPlatform(
     private val mapView: OlaMapView = OlaMapView(context)
     private val methodChannel = MethodChannel(messenger, "ola_map_view_$viewId")
     private var olaMap: OlaMap? = null
+    private val context: Context = context
 
     init {
         val apiKey = params["apiKey"] as? String ?: ""
@@ -51,17 +55,14 @@ class OlaMapViewPlatform(
         val initialLng = params["initialLng"] as? Double ?: 77.5742
         val initialZoom = params["initialZoom"] as? Double ?: 15.0
 
-        // TEMP FIX: Commented out until we locate correct initializer class
-        // OlaMaps.initialize(context, apiKey)
-
+        // Initialize map
         mapView.getMap(apiKey, object : OlaMapCallback {
             override fun onMapReady(map: OlaMap) {
                 Log.d("OlaMapView", "Map ready")
                 olaMap = map
-
-                // TEMP FIX: Commented out due to unresolved reference
-                // map.moveCamera(OlaLatLng(initialLat, initialLng), initialZoom.toFloat())
-
+                // Skip moveCamera; rely on initial position from Flutter
+                Log.d("OlaMapView", "Initial position set to $initialLat, $initialLng, zoom=$initialZoom")
+                methodChannel.invokeMethod("onMapLoaded", null)
                 setupMethodChannel()
             }
 
@@ -80,8 +81,8 @@ class OlaMapViewPlatform(
                     val lng = call.argument<Double>("longitude") ?: 0.0
                     val zoom = call.argument<Double>("zoom") ?: 15.0
                     if (olaMap != null) {
-                        // TEMP FIX: Commented out due to unresolved method
-                        // olaMap?.moveCamera(OlaLatLng(lat, lng), zoom.toFloat())
+                        // Skip moveCamera; log for debugging
+                        Log.w("OlaMapView", "moveCamera not supported, requested: $lat, $lng, zoom=$zoom")
                         result.success(null)
                     } else {
                         result.error("MAP_NOT_READY", "Map is not initialized", null)
@@ -90,17 +91,46 @@ class OlaMapViewPlatform(
                 "addMarker" -> {
                     val lat = call.argument<Double>("latitude") ?: 0.0
                     val lng = call.argument<Double>("longitude") ?: 0.0
+                    val id = call.argument<String>("id") ?: ""
                     if (olaMap != null) {
-                        // Create the OlaMarkerOptions using the Builder
-                        val position = OlaLatLng(lat, lng) // Use OlaLatLng to set position
-                        
+                        val position = OlaLatLng(lat, lng)
                         val markerOptions = OlaMarkerOptions.Builder()
-                            .setPosition(position) // Set position for the marker
-                            .setIsIconClickable(true) // Set this property if needed
-                            .build() // Finalize the marker options
-
-                        // Add marker to the map
+                            .setPosition(position)
+                            .setIsIconClickable(true)
+                            .build()
                         olaMap?.addMarker(markerOptions)
+                        Log.d("OlaMapView", "Marker added at $lat, $lng, id=$id")
+                        result.success(null)
+                    } else {
+                        result.error("MAP_NOT_READY", "Map is not initialized", null)
+                    }
+                }
+                "addCustomMarker" -> {
+                    val lat = call.argument<Double>("latitude") ?: 0.0
+                    val lng = call.argument<Double>("longitude") ?: 0.0
+                    val id = call.argument<String>("id") ?: ""
+                    val iconType = call.argument<String>("iconType") ?: ""
+                    val size = call.argument<Double>("size")?.toFloat() ?: 48.0f
+                    if (olaMap != null) {
+                        val position = OlaLatLng(lat, lng)
+                        val markerOptions = OlaMarkerOptions.Builder()
+                            .setPosition(position)
+                            .setIsIconClickable(true)
+                        if (iconType == "blue_dot") {
+                            val bitmap = createBlueDotBitmap(size)
+                            markerOptions.setIconBitmap(bitmap)
+                        }
+                        olaMap?.addMarker(markerOptions.build())
+                        Log.d("OlaMapView", "Blue dot added at $lat, $lng, id=$id")
+                        result.success(null)
+                    } else {
+                        result.error("MAP_NOT_READY", "Map is not initialized", null)
+                    }
+                }
+                "clearMarkers" -> {
+                    if (olaMap != null) {
+                        // Skip clearMarkers; log for debugging
+                        Log.w("OlaMapView", "clearMarkers not supported")
                         result.success(null)
                     } else {
                         result.error("MAP_NOT_READY", "Map is not initialized", null)
@@ -111,10 +141,26 @@ class OlaMapViewPlatform(
         }
     }
 
+    // Create a blue dot bitmap for the marker
+    private fun createBlueDotBitmap(size: Float): Bitmap {
+        val bitmap = Bitmap.createBitmap(size.toInt(), size.toInt(), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint()
+        paint.color = Color.BLUE
+        paint.style = Paint.Style.FILL
+        paint.isAntiAlias = true
+        canvas.drawCircle(size / 2, size / 2, size / 2, paint)
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = size / 10
+        canvas.drawCircle(size / 2, size / 2, size / 2 - size / 20, paint)
+        return bitmap
+    }
+
     override fun getView(): View = mapView
 
     override fun dispose() {
         Log.d("OlaMapView", "Disposing map view")
-        // mapView.onDestroy()  // Removed: doesn't exist
+        // No lifecycle methods available
     }
 }

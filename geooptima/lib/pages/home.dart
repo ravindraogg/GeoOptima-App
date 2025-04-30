@@ -5,7 +5,9 @@ import 'dart:async';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:flutter/gestures.dart';
 import 'ola_map_view.dart';
 
 class HomePage extends StatefulWidget {
@@ -15,25 +17,54 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   MethodChannel? platform;
   LatLng _currentPosition = LatLng(12.9549, 77.5742);
   bool _isLoading = true;
+  bool _isMapLoading = true;
+  bool _isMapReady = false; // New flag to track map readiness
   List<Map<String, dynamic>> _recentVisits = [];
   String _olaMapsApiKey = '';
   bool _isMapError = false;
   String _errorMessage = '';
   bool _isFullScreen = false;
+  bool _isLocationTracking = true;
+  late AnimationController _animationController;
+  Animation<double>? _fullScreenAnimation;
 
-  final DraggableScrollableController _dragController = DraggableScrollableController();
+  final DraggableScrollableController _dragController =
+      DraggableScrollableController();
   double _initialBottomSheetHeight = 0.25;
   double _minBottomSheetHeight = 0.25;
   double _maxBottomSheetHeight = 0.8;
 
+  // Scale gesture states
+  bool _isScaling = false;
+
   @override
   void initState() {
     super.initState();
+
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    _fullScreenAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: Curves.easeInOut,
+      ),
+    );
+
     _initializeApp();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    _dragController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeApp() async {
@@ -70,7 +101,8 @@ class _HomePageState extends State<HomePage> {
     try {
       final response = await http.get(
         Uri.parse(
-            'https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json?api_key=$_olaMapsApiKey'),
+          'https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json?api_key=$_olaMapsApiKey',
+        ),
       );
       if (response.statusCode != 200) {
         throw Exception('Invalid API key (Status ${response.statusCode}).');
@@ -85,20 +117,36 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _moveCamera(LatLng position, [double zoom = 15.0]) async {
-    if (platform == null) return;
+    if (platform == null || !_isMapReady) {
+      print('Map not ready yet, retrying after delay');
+      await Future.delayed(const Duration(milliseconds: 500));
+      return _moveCamera(position, zoom); // Retry
+    }
     try {
+      setState(() {
+        _isMapLoading = true;
+      });
       await platform!.invokeMethod('moveCamera', {
         'latitude': position.latitude,
         'longitude': position.longitude,
         'zoom': zoom,
       });
+      setState(() {
+        _isMapLoading = false;
+      });
     } on PlatformException catch (e) {
       print('Error moving camera: ${e.message}');
+      setState(() {
+        _isMapLoading = false;
+      });
     }
   }
 
   Future<void> _addMarker(LatLng position, String id) async {
-    if (platform == null) return;
+    if (platform == null || !_isMapReady) {
+      print('Map not ready yet, skipping marker addition');
+      return;
+    }
     try {
       await platform!.invokeMethod('addMarker', {
         'latitude': position.latitude,
@@ -110,74 +158,155 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _getUserLocation() async {
+  Future<void> _clearAllMarkers() async {
+    if (platform == null || !_isMapReady) {
+      print('Map not ready yet, skipping clear markers');
+      return;
+    }
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showLocationServiceDisabledMessage();
-        _tryUseLastKnownPosition();
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          _showLocationPermissionDeniedMessage();
-          _tryUseLastKnownPosition();
-          return;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        _showLocationPermissionPermanentlyDeniedMessage();
-        _tryUseLastKnownPosition();
-        return;
-      }
-
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 2), // Reduced timeout
-      );
-
-      setState(() {
-        _currentPosition = LatLng(position.latitude, position.longitude);
-      });
-
-      await _moveCamera(_currentPosition);
-      await _addMarker(_currentPosition, 'current');
-    } catch (e) {
-      print('Error getting location: $e');
-      _tryUseLastKnownPosition();
+      await platform!.invokeMethod('clearMarkers');
+    } on PlatformException catch (e) {
+      print('Error clearing markers: ${e.message}');
     }
   }
 
+ Future<void> _addCustomLocationMarker(LatLng position) async {
+  if (platform == null || !_isMapReady) {
+    print('Cannot add blue dot: platform=${platform != null}, isMapReady=$_isMapReady');
+    return;
+  }
+  try {
+    await platform!.invokeMethod('addCustomMarker', {
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+      'id': 'current_location',
+      'iconType': 'blue_dot',
+      'size': 48.0,
+    });
+    print('Blue dot added at ${position.latitude}, ${position.longitude}');
+  } on PlatformException catch (e) {
+    print('Error adding blue dot: ${e.message}');
+  }
+}
+
+Future<void> _getUserLocation() async {
+  setState(() {
+    _isMapLoading = true;
+  });
+  try {
+    // Check if location services are enabled
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      print('Location services disabled');
+      _showLocationServiceDisabledMessage();
+      await _tryUseLastKnownPosition();
+      return;
+    }
+
+    // Check and request location permissions
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        print('Location permission denied');
+        _showLocationPermissionDeniedMessage();
+        await _tryUseLastKnownPosition();
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      print('Location permission permanently denied');
+      _showLocationPermissionPermanentlyDeniedMessage();
+      await _tryUseLastKnownPosition();
+      return;
+    }
+
+    // Fetch current position
+    Position position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+      timeLimit: const Duration(seconds: 10), // Increased timeout
+    );
+
+    print('Location fetched: ${position.latitude}, ${position.longitude}');
+    setState(() {
+      _currentPosition = LatLng(position.latitude, position.longitude);
+      _isMapLoading = false;
+    });
+
+    // Update map with retries
+    await _updateMapWithRetries();
+  } catch (e) {
+    print('Error getting location: $e');
+    setState(() {
+      _isMapLoading = false;
+    });
+    await _tryUseLastKnownPosition();
+  }
+}
+
+Future<void> _updateMapWithRetries({int maxRetries = 3, int delayMs = 500}) async {
+  int attempts = 0;
+  while (attempts < maxRetries && !_isMapReady) {
+    print('Map not ready, retrying in ${delayMs}ms (attempt ${attempts + 1}/$maxRetries)');
+    await Future.delayed(Duration(milliseconds: delayMs));
+    attempts++;
+  }
+
+  if (_isMapReady) {
+    print('Map ready, updating camera and markers');
+    await _moveCamera(_currentPosition);
+    await _clearAllMarkers();
+    if (_isLocationTracking) {
+      await _addCustomLocationMarker(_currentPosition);
+    }
+  } else {
+    print('Map still not ready after $maxRetries retries');
+  }
+}
   void _showLocationServiceDisabledMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Location services are disabled. Using default location.'),
+        content: const Text(
+          'Location services are disabled. Using default location.',
+        ),
         action: SnackBarAction(
-            label: 'Enable', onPressed: () => Geolocator.openLocationSettings()),
+          label: 'Enable',
+          onPressed: () => Geolocator.openLocationSettings(),
+        ),
       ),
     );
+    setState(() {
+      _isMapLoading = false;
+    });
   }
 
   void _showLocationPermissionDeniedMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-          content: Text('Location permission denied. Using default location.')),
+        content: Text('Location permission denied. Using default location.'),
+      ),
     );
+    setState(() {
+      _isMapLoading = false;
+    });
   }
 
   void _showLocationPermissionPermanentlyDeniedMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content:
-            const Text('Location permission permanently denied. Using default location.'),
+        content: const Text(
+          'Location permission permanently denied. Using default location.',
+        ),
         action: SnackBarAction(
-            label: 'Settings', onPressed: () => Geolocator.openAppSettings()),
+          label: 'Settings',
+          onPressed: () => Geolocator.openAppSettings(),
+        ),
       ),
     );
+    setState(() {
+      _isMapLoading = false;
+    });
   }
 
   Future<void> _tryUseLastKnownPosition() async {
@@ -187,19 +316,31 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _currentPosition = LatLng(position.latitude, position.longitude);
         });
-        await _moveCamera(_currentPosition);
-        await _addMarker(_currentPosition, 'current');
+        if (_isMapReady) {
+          await _moveCamera(_currentPosition);
+          await _clearAllMarkers();
+          await _addMarker(_currentPosition, 'current');
+          if (_isLocationTracking) {
+            await _addCustomLocationMarker(_currentPosition);
+          }
+        }
       }
     } catch (e) {
       print('Error getting last known position: $e');
     } finally {
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoading = false;
+        _isMapLoading = false;
+      });
     }
   }
 
   Future<void> _loadRecentVisits() async {
     final List<Map<String, dynamic>> predefinedVisits = [
-      {'name': 'Centro Médico Nacional', 'location': LatLng(19.406397, -99.164989)},
+      {
+        'name': 'Centro Médico Nacional',
+        'location': LatLng(19.406397, -99.164989),
+      },
       {'name': 'ISKCON Bangalore', 'location': LatLng(13.0108, 77.5511)},
       {'name': 'Central Park', 'location': LatLng(40.7812, -73.9665)},
     ];
@@ -232,10 +373,14 @@ class _HomePageState extends State<HomePage> {
               'rating': 4.5 + (visits.length * 0.3),
             });
 
-            await _addMarker(visit['location'], 'visit_${visits.length}');
+            if (!_isFullScreen && _isMapReady) {
+              await _addMarker(visit['location'], 'visit_${visits.length}');
+            }
           }
         } else {
-          print('Failed to fetch visit ${visit['name']}: ${response.statusCode}');
+          print(
+            'Failed to fetch visit ${visit['name']}: ${response.statusCode}',
+          );
           visits.add({
             'name': visit['name'],
             'image': 'https://via.placeholder.com/300x180.png?text=Error',
@@ -265,12 +410,14 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _isFullScreen = !_isFullScreen;
       if (_isFullScreen) {
+        _animationController.forward();
         _dragController.animateTo(
           _minBottomSheetHeight,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
       } else {
+        _animationController.reverse();
         _dragController.animateTo(
           _initialBottomSheetHeight,
           duration: const Duration(milliseconds: 300),
@@ -278,6 +425,22 @@ class _HomePageState extends State<HomePage> {
         );
       }
     });
+
+    if (_isMapReady) {
+      _getUserLocation();
+    }
+  }
+
+  void _toggleLocationTracking() {
+    setState(() {
+      _isLocationTracking = !_isLocationTracking;
+    });
+
+    if (_isLocationTracking && _isMapReady) {
+      _getUserLocation();
+    } else {
+      _clearAllMarkers();
+    }
   }
 
   Future<void> _retryLoadApiKey() async {
@@ -285,6 +448,7 @@ class _HomePageState extends State<HomePage> {
       _isMapError = false;
       _errorMessage = '';
       _isLoading = true;
+      _isMapLoading = true;
     });
     await _loadApiKey();
     if (!_isMapError) {
@@ -297,130 +461,498 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _isMapError = true;
       _errorMessage = 'Map error: $error';
+      _isMapLoading = false;
     });
+  }
+
+  Future<void> _clearLoginState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLoggedIn', false);
+    await prefs.remove('authToken');
+    await prefs.remove('phoneNumber');
+    debugPrint('Login state cleared');
+  }
+
+  Future<bool> _onWillPop() async {
+    if (_isFullScreen) {
+      _toggleFullScreen();
+      return false;
+    }
+
+    return await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(
+              'Exit App',
+              style: GoogleFonts.montserrat(fontWeight: FontWeight.w600),
+            ),
+            content: Text(
+              'Do you want to exit the app or go back to login/register?',
+              style: GoogleFonts.montserrat(),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.montserrat(color: Colors.black),
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await _clearLoginState();
+                  Navigator.of(context).pop(true);
+                },
+                child: Text(
+                  'Logout',
+                  style: GoogleFonts.montserrat(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Container(
-          width: MediaQuery.of(context).size.width,
-          height: MediaQuery.of(context).size.height,
-          clipBehavior: Clip.antiAlias,
-          decoration: const BoxDecoration(color: Colors.white),
-          child: Stack(
-            children: [
-              GestureDetector(
-                onScaleStart: (_) {
-                  if (!_isFullScreen && _olaMapsApiKey.isNotEmpty) {
-                    _toggleFullScreen();
-                  }
-                },
-                onDoubleTap: _isFullScreen ? _toggleFullScreen : null,
-                child: _olaMapsApiKey.isEmpty
-                    ? Container(
-                        color: Colors.grey[200],
-                        child: const Center(
-                          child: Text(
-                            'Map unavailable. Please provide an Ola Maps API key.',
-                            style: TextStyle(fontSize: 18, color: Colors.black54),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      )
-                    : OlaMapView(
-                        apiKey: _olaMapsApiKey,
-                        initialCameraPosition: CameraPosition(
-                          target: _currentPosition,
-                          zoom: 15.0,
-                        ),
-                        onMapCreated: (MethodChannel channel) {
-                          setState(() {
-                            platform = channel;
-                          });
-                          // Set up error handler
-                          channel.setMethodCallHandler((call) async {
-                            if (call.method == 'onError') {
-                              _handleMapError(call.arguments as String);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    if (_fullScreenAnimation == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        body: SafeArea(
+          child: Container(
+            width: screenWidth,
+            height: screenHeight,
+            clipBehavior: Clip.antiAlias,
+            decoration: const BoxDecoration(color: Colors.white),
+            child: Stack(
+              children: [
+                // Map container with improved gesture handling
+                RawGestureDetector(
+                  gestures: {
+                    ScaleGestureRecognizer:
+                        GestureRecognizerFactoryWithHandlers<ScaleGestureRecognizer>(
+                      () => ScaleGestureRecognizer(),
+                      (ScaleGestureRecognizer instance) {
+                        instance
+                          ..onStart = (details) {
+                            _isScaling = true;
+                          }
+                          ..onUpdate = (details) {
+                            if (_isScaling &&
+                                details.scale > 1.1 &&
+                                !_isFullScreen &&
+                                _olaMapsApiKey.isNotEmpty) {
+                              _toggleFullScreen();
+                              _isScaling = false;
                             }
-                            return null;
-                          });
-                          _moveCamera(_currentPosition);
-                          _addMarker(_currentPosition, 'current');
-                        },
-                      ),
-              ),
-              if (!_isFullScreen && _olaMapsApiKey.isNotEmpty) ...[
-                _buildSidebar(),
-                _buildSearchBar(),
-                _buildCategoryFilters(),
-                _buildDraggableRecentVisits(),
-                _buildLocationButton(),
-              ],
-              if (_isFullScreen && _olaMapsApiKey.isNotEmpty)
-                Positioned(
-                  top: 20,
-                  right: 20,
-                  child: FloatingActionButton(
-                    mini: true,
-                    backgroundColor: Colors.black,
-                    onPressed: _toggleFullScreen,
-                    child: const Icon(Icons.fullscreen_exit, color: Colors.white),
+                          }
+                          ..onEnd = (details) {
+                            _isScaling = false;
+                          };
+                      },
+                    ),
+                    TapGestureRecognizer:
+                        GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+                      () => TapGestureRecognizer(),
+                      (TapGestureRecognizer instance) {
+                        instance
+                          ..onTap = () {
+                            if (!_isFullScreen && _olaMapsApiKey.isNotEmpty) {
+                              _toggleFullScreen();
+                            }
+                          };
+                      },
+                    ),
+                    DoubleTapGestureRecognizer:
+                        GestureRecognizerFactoryWithHandlers<DoubleTapGestureRecognizer>(
+                      () => DoubleTapGestureRecognizer(),
+                      (DoubleTapGestureRecognizer instance) {
+                        instance
+                          ..onDoubleTap = () {
+                            if (_isFullScreen) {
+                              _toggleFullScreen();
+                            }
+                          };
+                      },
+                    ),
+                  },
+                  child: ScaleTransition(
+                    scale: _fullScreenAnimation!,
+                    child: _olaMapsApiKey.isEmpty
+                        ? Container(
+                            color: Colors.grey[200],
+                            child: const Center(
+                              child: Text(
+                                'Map unavailable. Please provide an Ola Maps API key.',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.black54,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          )
+                        : OlaMapView(
+                            apiKey: _olaMapsApiKey,
+                            initialCameraPosition: CameraPosition(
+                              target: _currentPosition,
+                              zoom: 15.0,
+                            ),
+                            onMapCreated: (MethodChannel channel) {
+                              setState(() {
+                                platform = channel;
+                              });
+                              channel.setMethodCallHandler((call) async {
+                                if (call.method == 'onError') {
+                                  _handleMapError(call.arguments as String);
+                                } else if (call.method == 'onMapLoaded') {
+                                  setState(() {
+                                    _isMapReady = true;
+                                    _isMapLoading = false;
+                                  });
+                                  _moveCamera(_currentPosition);
+                                  _addMarker(_currentPosition, 'current');
+                                  if (_isLocationTracking) {
+                                    _addCustomLocationMarker(_currentPosition);
+                                  }
+                                }
+                                return null;
+                              });
+                            },
+                          ),
                   ),
                 ),
-              if (_isLoading) const Center(child: CircularProgressIndicator()),
-              if (_isMapError)
-                Center(
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.8),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.error_outline, color: Colors.orange, size: 48),
-                        const SizedBox(height: 8),
-                        Text('Map Error',
-                            style: GoogleFonts.montserrat(
-                                fontWeight: FontWeight.bold, fontSize: 18)),
-                        const SizedBox(height: 8),
-                        Text(_errorMessage,
-                            style: GoogleFonts.montserrat(), textAlign: TextAlign.center),
-                        const SizedBox(height: 16),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            ElevatedButton(
-                              onPressed: _retryLoadApiKey,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.black,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10)),
-                              ),
-                              child: Text('Retry', style: GoogleFonts.montserrat()),
-                            ),
-                            const SizedBox(width: 10),
-                            ElevatedButton(
-                              onPressed: () => setState(() => _isMapError = false),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.grey,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10)),
-                              ),
-                              child: Text('Dismiss', style: GoogleFonts.montserrat()),
+
+                // Regular view UI elements
+                if (!_isFullScreen && _olaMapsApiKey.isNotEmpty) ...[
+                  _buildSidebar(),
+                  _buildSearchBar(),
+                  _buildCategoryFilters(),
+                  _buildDraggableRecentVisits(),
+                  _buildLocationButton(),
+                ],
+
+                // Full screen view UI elements
+                if (_isFullScreen && _olaMapsApiKey.isNotEmpty) ...[
+                  // Back button
+                  Positioned(
+                    left: 15,
+                    top: 15,
+                    child: GestureDetector(
+                      onTap: _toggleFullScreen,
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
                             ),
                           ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            'G',
+                            style: GoogleFonts.montserrat(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Search bar
+                  Positioned(
+                    left: 70,
+                    top: 15,
+                    right: 15,
+                    child: Container(
+                      height: 42,
+                      decoration: ShapeDecoration(
+                        color: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          side: const BorderSide(width: 1.5),
+                          borderRadius: BorderRadius.circular(21),
+                        ),
+                        shadows: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 16),
+                          Text(
+                            'Search',
+                            style: GoogleFonts.montserrat(
+                              textStyle: TextStyle(
+                                color: Colors.black.withOpacity(0.6),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          const Padding(
+                            padding: EdgeInsets.only(right: 16.0),
+                            child: Icon(
+                              Icons.search,
+                              color: Colors.black,
+                              size: 22,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Location button
+                  Positioned(
+                    right: 15,
+                    bottom: 145,
+                    child: Material(
+                      elevation: 4,
+                      shape: const CircleBorder(),
+                      color: Colors.black,
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: _getUserLocation,
+                        child: Container(
+                          width: 50,
+                          height: 50,
+                          decoration: const ShapeDecoration(
+                            color: Colors.black,
+                            shape: CircleBorder(),
+                          ),
+                          child: const Icon(
+                            Icons.my_location,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Location tracking toggle
+                  Positioned(
+                    right: 15,
+                    bottom: 85,
+                    child: Material(
+                      elevation: 4,
+                      shape: const CircleBorder(),
+                      color: _isLocationTracking ? Colors.blue : Colors.grey,
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: _toggleLocationTracking,
+                        child: Container(
+                          width: 50,
+                          height: 50,
+                          decoration: ShapeDecoration(
+                            color:
+                                _isLocationTracking ? Colors.blue : Colors.grey,
+                            shape: const CircleBorder(),
+                          ),
+                          child: Icon(
+                            _isLocationTracking
+                                ? Icons.gps_fixed
+                                : Icons.gps_not_fixed,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Zoom controls
+                  Positioned(
+                    right: 15,
+                    bottom: 25,
+                    child: Column(
+                      children: [
+                        Material(
+                          elevation: 4,
+                          shape: const CircleBorder(),
+                          color: Colors.white,
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () async {
+                              if (_isMapReady) {
+                                await _moveCamera(_currentPosition, 16.0);
+                              }
+                            },
+                            child: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: const ShapeDecoration(
+                                color: Colors.white,
+                                shape: CircleBorder(),
+                              ),
+                              child: const Icon(
+                                Icons.add,
+                                color: Colors.black,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Material(
+                          elevation: 4,
+                          shape: const CircleBorder(),
+                          color: Colors.white,
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () async {
+                              if (_isMapReady) {
+                                await _moveCamera(_currentPosition, 14.0);
+                              }
+                            },
+                            child: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: const ShapeDecoration(
+                                color: Colors.white,
+                                shape: CircleBorder(),
+                              ),
+                              child: const Icon(
+                                Icons.remove,
+                                color: Colors.black,
+                                size: 24,
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ),
-            ],
+                ],
+
+                // Loading and error indicators
+                if (_isMapLoading)
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Loading map...',
+                            style: GoogleFonts.montserrat(
+                              color: Colors.white,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                if (_isLoading && !_isMapLoading)
+                  const Center(child: CircularProgressIndicator()),
+
+                if (_isMapError)
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.8),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            color: Colors.orange,
+                            size: 48,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Map Error',
+                            style: GoogleFonts.montserrat(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _errorMessage,
+                            style: GoogleFonts.montserrat(),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              ElevatedButton(
+                                onPressed: _retryLoadApiKey,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.black,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: Text(
+                                  'Retry',
+                                  style: GoogleFonts.montserrat(),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              ElevatedButton(
+                                onPressed: () =>
+                                    setState(() => _isMapError = false),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: Text(
+                                  'Dismiss',
+                                  style: GoogleFonts.montserrat(),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -437,19 +969,37 @@ class _HomePageState extends State<HomePage> {
         decoration: const ShapeDecoration(
           color: Colors.black,
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.only(
-                  topRight: Radius.circular(15), bottomRight: Radius.circular(15))),
-          shadows: [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(2, 0))],
+            borderRadius: BorderRadius.only(
+              topRight: Radius.circular(15),
+              bottomRight: Radius.circular(15),
+            ),
+          ),
+          shadows: [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 8,
+              offset: Offset(2, 0),
+            ),
+          ],
         ),
         child: Column(
           children: [
             const SizedBox(height: 15),
-            Text('G',
-                style: GoogleFonts.montserrat(
-                    textStyle: const TextStyle(
-                        color: Colors.white, fontSize: 40, fontWeight: FontWeight.w500))),
+            Text(
+              'G',
+              style: GoogleFonts.montserrat(
+                textStyle: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 40,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
             const SizedBox(height: 60),
-            _sidebarButton(Icons.person, () {}),
+           _sidebarButton(Icons.person, () {
+  Navigator.pushNamed(context, '/profile');
+}),
+
             const SizedBox(height: 25),
             _sidebarButton(Icons.grid_view, () {}),
             const SizedBox(height: 25),
@@ -491,24 +1041,35 @@ class _HomePageState extends State<HomePage> {
         decoration: ShapeDecoration(
           color: Colors.white,
           shape: RoundedRectangleBorder(
-              side: const BorderSide(width: 2), borderRadius: BorderRadius.circular(24)),
+            side: const BorderSide(width: 2),
+            borderRadius: BorderRadius.circular(24),
+          ),
           shadows: [
-            BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 4, offset: const Offset(0, 2))
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
         child: Row(
           children: [
             const SizedBox(width: 16),
-            Text('Search',
-                style: GoogleFonts.montserrat(
-                    textStyle: TextStyle(
-                        color: Colors.black.withOpacity(0.6),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w500))),
+            Text(
+              'Search',
+              style: GoogleFonts.montserrat(
+                textStyle: TextStyle(
+                  color: Colors.black.withOpacity(0.6),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
             const Spacer(),
             const Padding(
-                padding: EdgeInsets.only(right: 16.0),
-                child: Icon(Icons.search, color: Colors.black, size: 25)),
+              padding: EdgeInsets.only(right: 16.0),
+              child: Icon(Icons.search, color: Colors.black, size: 25),
+            ),
           ],
         ),
       ),
@@ -545,10 +1106,15 @@ class _HomePageState extends State<HomePage> {
       decoration: ShapeDecoration(
         color: Colors.white,
         shape: RoundedRectangleBorder(
-            side: const BorderSide(width: 1.5, color: Colors.black87),
-            borderRadius: BorderRadius.circular(15)),
+          side: const BorderSide(width: 1.5, color: Colors.black87),
+          borderRadius: BorderRadius.circular(15),
+        ),
         shadows: [
-          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 3, offset: const Offset(0, 1))
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
         ],
       ),
       child: Row(
@@ -556,10 +1122,16 @@ class _HomePageState extends State<HomePage> {
         children: [
           Icon(icon, size: 18),
           const SizedBox(width: 6),
-          Text(label,
-              style: GoogleFonts.montserrat(
-                  textStyle: const TextStyle(
-                      color: Colors.black, fontSize: 13, fontWeight: FontWeight.w500))),
+          Text(
+            label,
+            style: GoogleFonts.montserrat(
+              textStyle: const TextStyle(
+                color: Colors.black,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -576,9 +1148,15 @@ class _HomePageState extends State<HomePage> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(25), topRight: Radius.circular(25)),
+              topLeft: Radius.circular(25),
+              topRight: Radius.circular(25),
+            ),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, -3))
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 8,
+                offset: const Offset(0, -3),
+              ),
             ],
           ),
           child: Column(
@@ -589,28 +1167,53 @@ class _HomePageState extends State<HomePage> {
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   width: 40,
                   height: 5,
-                  decoration:
-                      BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Recent Visits',
-                        style: GoogleFonts.montserrat(
-                            textStyle:
-                                const TextStyle(color: Colors.black, fontSize: 22, fontWeight: FontWeight.w600))),
-                    IconButton(icon: const Icon(Icons.more_horiz), onPressed: () {}),
-                  ],
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width - 40,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          'Recent Visits',
+                          style: GoogleFonts.montserrat(
+                            textStyle: const TextStyle(
+                              color: Colors.black,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.more_horiz),
+                        onPressed: () {},
+                      ),
+                    ],
+                  ),
                 ),
               ),
               Expanded(
                 child: _recentVisits.isEmpty
                     ? Center(
-                        child: Text('No recent visits',
-                            style: GoogleFonts.montserrat(color: Colors.grey, fontSize: 16)))
+                        child: Text(
+                          'No recent visits',
+                          style: GoogleFonts.montserrat(
+                            color: Colors.grey,
+                            fontSize: 16,
+                          ),
+                        ),
+                      )
                     : ListView.builder(
                         controller: scrollController,
                         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -626,9 +1229,10 @@ class _HomePageState extends State<HomePage> {
                                 color: Colors.white,
                                 boxShadow: [
                                   BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2))
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
                                 ],
                               ),
                               child: Column(
@@ -637,57 +1241,89 @@ class _HomePageState extends State<HomePage> {
                                   Container(
                                     height: 180,
                                     decoration: BoxDecoration(
-                                      borderRadius:
-                                          const BorderRadius.vertical(top: Radius.circular(20)),
+                                      borderRadius: const BorderRadius.vertical(
+                                        top: Radius.circular(20),
+                                      ),
                                       image: DecorationImage(
                                         image: NetworkImage(visit['image']),
                                         fit: BoxFit.cover,
-                                        onError: (_, __) =>
-                                            const AssetImage('assets/placeholder.jpg'),
+                                        onError: (_, __) => const AssetImage(
+                                          'assets/placeholder.jpg',
+                                        ),
                                       ),
                                     ),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.all(12),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Text(visit['name'],
+                                            Flexible(
+                                              child: Text(
+                                                visit['name'],
                                                 style: GoogleFonts.montserrat(
-                                                    textStyle: const TextStyle(
-                                                        color: Colors.black,
-                                                        fontSize: 18,
-                                                        fontWeight: FontWeight.w600))),
+                                                  textStyle: const TextStyle(
+                                                    color: Colors.black,
+                                                    fontSize: 18,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
                                             Row(
                                               children: [
-                                                const Icon(Icons.star, color: Colors.amber, size: 18),
+                                                const Icon(
+                                                  Icons.star,
+                                                  color: Colors.amber,
+                                                  size: 18,
+                                                ),
                                                 const SizedBox(width: 4),
-                                                Text('${visit['rating']}',
-                                                    style: GoogleFonts.montserrat(
-                                                        textStyle: const TextStyle(
-                                                            color: Colors.black,
-                                                            fontSize: 14,
-                                                            fontWeight: FontWeight.w500))),
+                                                Text(
+                                                  '${visit['rating']}',
+                                                  style: GoogleFonts.montserrat(
+                                                    textStyle: const TextStyle(
+                                                      color: Colors.black,
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ),
                                               ],
                                             ),
                                           ],
                                         ),
                                         const SizedBox(height: 6),
-                                        Text(visit['address'],
-                                            style: GoogleFonts.montserrat(
-                                                textStyle: TextStyle(
-                                                    color: Colors.grey.shade700,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w400))),
+                                        Text(
+                                          visit['address'],
+                                          style: GoogleFonts.montserrat(
+                                            textStyle: TextStyle(
+                                              color: Colors.grey.shade700,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w400,
+                                            ),
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                         const SizedBox(height: 10),
                                         Row(
                                           children: [
-                                            _actionButton(Icons.directions, 'Directions'),
+                                            _actionButton(
+                                              Icons.directions,
+                                              'Directions',
+                                            ),
                                             const SizedBox(width: 12),
-                                            _actionButton(Icons.info_outline, 'Details'),
+                                            _actionButton(
+                                              Icons.info_outline,
+                                              'Details',
+                                            ),
                                           ],
                                         ),
                                       ],
@@ -720,10 +1356,16 @@ class _HomePageState extends State<HomePage> {
         children: [
           Icon(icon, size: 16, color: Colors.black87),
           const SizedBox(width: 6),
-          Text(label,
-              style: GoogleFonts.montserrat(
-                  textStyle: const TextStyle(
-                      color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w500))),
+          Text(
+            label,
+            style: GoogleFonts.montserrat(
+              textStyle: const TextStyle(
+                color: Colors.black87,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -732,7 +1374,8 @@ class _HomePageState extends State<HomePage> {
   Widget _buildLocationButton() {
     return Positioned(
       right: 20,
-      bottom: MediaQuery.of(context).size.height * _initialBottomSheetHeight + 20,
+      bottom:
+          MediaQuery.of(context).size.height * _initialBottomSheetHeight + 20,
       child: Material(
         elevation: 4,
         shape: const CircleBorder(),
@@ -743,7 +1386,10 @@ class _HomePageState extends State<HomePage> {
           child: Container(
             width: 60,
             height: 60,
-            decoration: const ShapeDecoration(color: Colors.black, shape: CircleBorder()),
+            decoration: const ShapeDecoration(
+              color: Colors.black,
+              shape: CircleBorder(),
+            ),
             child: const Icon(Icons.my_location, color: Colors.white, size: 28),
           ),
         ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:geooptima/pages/otp-verification.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class RegisterScreen extends StatefulWidget {
   final String?
@@ -389,75 +390,77 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   Future<void> _submitFullRegistration() async {
-    final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text}';
-    final validationError = _validateFullRegistration();
+  final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text}';
+  final validationError = _validateFullRegistration();
 
-    if (validationError != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(validationError)));
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final response = await http.post(
-        Uri.parse(
-          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/complete-registration',
-        ),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'phoneNumber': fullPhoneNumber,
-          'fullName': _nameController.text,
-          'email': _emailController.text,
-          'gender': _selectedGender,
-          'dateOfBirth': _dobController.text,
-        }),
-      );
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Account created successfully!')),
-        );
-
-        if (data['token'] != null) {
-          debugPrint('Token received: ${data['token']}');
-        }
-
-        Navigator.pushReplacementNamed(context, '/home');
-      } else {
-        String errorMessage = 'Registration failed';
-
-        try {
-          final errorData = jsonDecode(response.body);
-          errorMessage = errorData['error'] ?? errorMessage;
-        } catch (e) {
-          errorMessage = 'Registration failed. Please try again.';
-        }
-
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(errorMessage)));
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to connect to server: ${e.toString()}')),
-      );
-      debugPrint('Registration error: $e');
-    }
+  if (validationError != null) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validationError)));
+    return;
   }
 
+  setState(() {
+    _isLoading = true;
+  });
+
+  try {
+    final response = await http.post(
+      Uri.parse(
+        'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/complete-registration',
+      ),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'phoneNumber': fullPhoneNumber,
+        'fullName': _nameController.text,
+        'email': _emailController.text,
+        'gender': _selectedGender,
+        'dateOfBirth': _dobController.text,
+      }),
+    );
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final String token = data['token'] ?? '';
+      await _saveLoginState(token); // Save login state
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Account created successfully!')),
+      );
+
+      if (data['token'] != null) {
+        debugPrint('Token received: ${data['token']}');
+      }
+
+      Navigator.pushReplacementNamed(context, '/home');
+    } else {
+      String errorMessage = 'Registration failed';
+      try {
+        final errorData = jsonDecode(response.body);
+        errorMessage = errorData['error'] ?? errorMessage;
+      } catch (e) {
+        errorMessage = 'Registration failed. Please try again.';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage)));
+    }
+  } catch (e) {
+    setState(() {
+      _isLoading = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed to connect to server: ${e.toString()}')),
+    );
+    debugPrint('Registration error: $e');
+  }
+}
+Future<void> _saveLoginState(String token) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool('isLoggedIn', true);
+  await prefs.setString('authToken', token);
+  await prefs.setString('phoneNumber', '$_selectedCountryCode${_phoneController.text}');
+  debugPrint('Login state saved: isLoggedIn=true, token=$token');
+}
   void _toggleCountryDropdown() {
     setState(() {
       _isCountryDropdownOpen = !_isCountryDropdownOpen;

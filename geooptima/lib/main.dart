@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geooptima/pages/home.dart';
+import 'package:geooptima/pages/profile_summary_screen.dart';
 import 'package:geooptima/pages/register.dart';
 import 'package:geooptima/pages/login.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -36,17 +37,17 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      initialRoute: '/',
+      initialRoute: isLoggedIn ? '/home' : '/', // Redirect to home if logged in
       routes: {
         '/': (context) => const ResponsiveScreen(),
         '/register': (context) => const RegisterScreen(),
         '/login': (context) => const LoginScreen(),
         '/home': (context) => const HomePage(),
+        '/profile': (context) => const ProfileSummaryScreen(),
       },
     );
   }
 }
-
 class ResponsiveScreen extends StatefulWidget {
   const ResponsiveScreen({super.key});
 
