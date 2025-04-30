@@ -320,7 +320,9 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.122.137:5000/api/auth/register'),
+        Uri.parse(
+          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/register',
+        ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phoneNumber': fullPhoneNumber}),
       );
@@ -403,7 +405,9 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.122.137:5000/api/auth/complete-registration'),
+        Uri.parse(
+          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/complete-registration',
+        ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'phoneNumber': fullPhoneNumber,

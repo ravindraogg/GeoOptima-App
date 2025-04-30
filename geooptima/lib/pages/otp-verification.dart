@@ -6,7 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phoneNumber;
-  final bool isFromRegister; // Indicates if the screen is called from register.dart
+  final bool
+  isFromRegister; // Indicates if the screen is called from register.dart
   const OtpVerificationScreen({
     super.key,
     required this.phoneNumber,
@@ -18,8 +19,14 @@ class OtpVerificationScreen extends StatefulWidget {
 }
 
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
-  final List<TextEditingController> _otpControllers = List.generate(4, (index) => TextEditingController());
-  final List<FocusNode> _otpFocusNodes = List.generate(4, (index) => FocusNode());
+  final List<TextEditingController> _otpControllers = List.generate(
+    4,
+    (index) => TextEditingController(),
+  );
+  final List<FocusNode> _otpFocusNodes = List.generate(
+    4,
+    (index) => FocusNode(),
+  );
   bool _isLoading = false;
 
   @override
@@ -44,7 +51,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     super.dispose();
   }
 
-  String get completeOtp => _otpControllers.map((controller) => controller.text).join();
+  String get completeOtp =>
+      _otpControllers.map((controller) => controller.text).join();
 
   // Save login state and token to shared preferences
   Future<void> _saveLoginState(String token) async {
@@ -69,7 +77,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.122.137:5000/api/auth/verify-otp'),
+        Uri.parse(
+          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/verify-otp',
+        ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'phoneNumber': widget.phoneNumber,
@@ -84,13 +94,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final String token = data['token'] ?? '';
-        
+
         // Save login state when verification is successful
         await _saveLoginState(token);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'])),
-        );
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(data['message'])));
 
         if (widget.isFromRegister) {
           // Return to register.dart with verification result
@@ -100,16 +110,19 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
         }
       } else {
-        final error = jsonDecode(response.body)['error'] ?? 'Verification failed';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+        final error =
+            jsonDecode(response.body)['error'] ?? 'Verification failed';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error)));
       }
     } catch (e) {
       setState(() {
         _isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to verify OTP: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to verify OTP: $e')));
       debugPrint('Verification error details: $e');
     }
   }
@@ -258,7 +271,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                         decoration: ShapeDecoration(
                           color: const Color(0xFFD9D9D9),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(15 * widthRatio),
+                            borderRadius: BorderRadius.circular(
+                              15 * widthRatio,
+                            ),
                           ),
                         ),
                         child: TextField(
@@ -266,9 +281,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                           focusNode: _otpFocusNodes[index],
                           onChanged: (value) {
                             if (value.length == 1 && index < 3) {
-                              FocusScope.of(context).requestFocus(_otpFocusNodes[index + 1]);
+                              FocusScope.of(
+                                context,
+                              ).requestFocus(_otpFocusNodes[index + 1]);
                             } else if (value.isEmpty && index > 0) {
-                              FocusScope.of(context).requestFocus(_otpFocusNodes[index - 1]);
+                              FocusScope.of(
+                                context,
+                              ).requestFocus(_otpFocusNodes[index - 1]);
                             }
                           },
                           keyboardType: TextInputType.number,
@@ -310,23 +329,24 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                       ),
                     ),
                     child: Center(
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                color: Colors.black,
-                                strokeWidth: 3,
+                      child:
+                          _isLoading
+                              ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  color: Colors.black,
+                                  strokeWidth: 3,
+                                ),
+                              )
+                              : Text(
+                                'Verify',
+                                style: GoogleFonts.montserrat(
+                                  color: Colors.black,
+                                  fontSize: 20 * widthRatio,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
-                            )
-                          : Text(
-                              'Verify',
-                              style: GoogleFonts.montserrat(
-                                color: Colors.black,
-                                fontSize: 20 * widthRatio,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
                     ),
                   ),
                 ),
@@ -361,9 +381,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   height: double.infinity,
                   color: Colors.black.withOpacity(0.3),
                   child: const Center(
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                    ),
+                    child: CircularProgressIndicator(color: Colors.white),
                   ),
                 ),
             ],

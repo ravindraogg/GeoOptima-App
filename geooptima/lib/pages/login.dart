@@ -259,26 +259,31 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() {
-      _isLoading = true; // Show loading indicator in the button
+      _isLoading = true;
     });
 
     try {
       final fullPhoneNumber = '$_selectedCountryCode$phoneNumber';
       final response = await http.post(
-        Uri.parse('http://192.168.122.137:5000/api/auth/login'),
+        Uri.parse(
+          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/login',
+        ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phoneNumber': fullPhoneNumber}),
       );
 
       setState(() {
-        _isLoading = false; // Hide loading indicator
+        _isLoading = false;
       });
+
+      
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        final otp = data['otp']?.toString() ?? 'Not provided';
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(data['message'])));
+        ).showSnackBar(SnackBar(content: Text('${data['message']} OTP: $otp')));
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -295,7 +300,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       setState(() {
-        _isLoading = false; // Hide loading indicator on error
+        _isLoading = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to connect to server: $e')),
