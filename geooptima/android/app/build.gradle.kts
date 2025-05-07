@@ -55,6 +55,7 @@ repositories {
 
 dependencies {
     implementation(files("libs/OlaMapSdk-1.6.0.aar"))
+    implementation(files("libs/Places-sdk-2.3.9.jar"))
     implementation ("androidx.core:core:1.12.0")
     implementation ("androidx.fragment:fragment:1.6.2")
     implementation("androidx.appcompat:appcompat:1.6.1")
@@ -63,6 +64,8 @@ dependencies {
     implementation ("org.maplibre.gl:android-sdk:10.0.2")
     implementation ("org.maplibre.gl:android-plugin-annotation-v9:1.0.0")
     implementation ("org.maplibre.gl:android-plugin-markerview-v9:1.0.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
 }
  
 

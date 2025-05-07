@@ -1,10 +1,10 @@
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ProfileSummaryScreen extends StatefulWidget {
   const ProfileSummaryScreen({super.key});
@@ -13,7 +13,8 @@ class ProfileSummaryScreen extends StatefulWidget {
   State<ProfileSummaryScreen> createState() => _ProfileSummaryScreenState();
 }
 
-class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
+class _ProfileSummaryScreenState extends State<ProfileSummaryScreen>
+    with SingleTickerProviderStateMixin {
   bool _isEditing = false;
   bool _isLoading = false;
   final TextEditingController _fullNameController = TextEditingController();
@@ -24,24 +25,63 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
   int _currentIndex = 0;
   final _storage = FlutterSecureStorage();
   String? _errorMessage;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    );
+    _loadCachedProfile();
     _checkTokenAndFetchProfile();
   }
 
   @override
   void dispose() {
+    _animationController.dispose();
     _fullNameController.dispose();
     _emailController.dispose();
     super.dispose();
   }
 
   Future<String?> _getToken() async {
-    final token = await _storage.read(key: 'jwt_token');
+    final token = await _storage.read(key: 'key_auth_token');
     debugPrint('Retrieved token: $token');
     return token;
+  }
+
+  Future<void> _loadCachedProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _phoneNumber = prefs.getString('cached_phoneNumber') ?? '';
+      _fullNameController.text = prefs.getString('cached_fullName') ?? '';
+      _emailController.text = prefs.getString('cached_email') ?? '';
+      _selectedGender = prefs.getString('cached_gender') != '' ? prefs.getString('cached_gender') : null;
+      String? dob = prefs.getString('cached_dateOfBirth');
+      if (dob != null && dob.isNotEmpty) {
+        try {
+          _selectedDateOfBirth = DateFormat('dd/MM/yyyy').parse(dob);
+        } catch (e) {
+          debugPrint('Failed to parse cached dateOfBirth: $dob');
+        }
+      }
+    });
+  }
+
+  Future<void> _cacheProfileData(Map<String, dynamic> data) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('cached_phoneNumber', data['phoneNumber'] ?? '');
+    await prefs.setString('cached_fullName', data['fullName'] ?? '');
+    await prefs.setString('cached_email', data['email'] ?? '');
+    await prefs.setString('cached_gender', data['gender'] ?? '');
+    await prefs.setString('cached_dateOfBirth', data['dateOfBirth'] ?? '');
   }
 
   Future<void> _checkTokenAndFetchProfile() async {
@@ -58,6 +98,7 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
 
   Future<void> _fetchProfile() async {
     setState(() => _isLoading = true);
+    _animationController.forward();
     try {
       final token = await _getToken();
       if (token == null) {
@@ -68,20 +109,23 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
         return;
       }
 
-      debugPrint('Fetching profile with token: $token');
+      debugPrint('Token: $token');
       final response = await http.get(
-        Uri.parse('https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
+        Uri.parse(
+            'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
       );
 
-      debugPrint('Profile fetch response: Status ${response.statusCode}, Body: ${response.body}');
+      debugPrint('Response Status: ${response.statusCode}');
+      debugPrint('Response Body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         debugPrint('Profile data: $data');
+        await _cacheProfileData(data);
         setState(() {
           _phoneNumber = data['phoneNumber'] ?? '';
           _fullNameController.text = data['fullName'] ?? '';
@@ -92,7 +136,8 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
               _selectedDateOfBirth = DateTime.parse(data['dateOfBirth']);
             } catch (e) {
               try {
-                _selectedDateOfBirth = DateFormat('dd/MM/yyyy').parse(data['dateOfBirth']);
+                _selectedDateOfBirth =
+                    DateFormat('dd/MM/yyyy').parse(data['dateOfBirth']);
               } catch (e) {
                 debugPrint('Failed to parse dateOfBirth: ${data['dateOfBirth']}');
               }
@@ -100,19 +145,53 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
           }
           _errorMessage = null;
         });
+      } else if (response.statusCode == 401) {
+        debugPrint('Received 401, attempting to refresh token');
+        final newToken = await _refreshToken();
+        if (newToken != null) {
+          debugPrint('Retrying profile fetch with new token');
+          final retryResponse = await http.get(
+            Uri.parse(
+                'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
+            headers: {
+              'Authorization': 'Bearer $newToken',
+              'Content-Type': 'application/json',
+            },
+          );
+          if (retryResponse.statusCode == 200) {
+            final data = jsonDecode(retryResponse.body);
+            await _cacheProfileData(data);
+            setState(() {
+              _phoneNumber = data['phoneNumber'] ?? '';
+              _fullNameController.text = data['fullName'] ?? '';
+              _emailController.text = data['email'] ?? '';
+              _selectedGender = data['gender'] != '' ? data['gender'] : null;
+              if (data['dateOfBirth'] != null) {
+                try {
+                  _selectedDateOfBirth = DateTime.parse(data['dateOfBirth']);
+                } catch (e) {
+                  try {
+                    _selectedDateOfBirth =
+                        DateFormat('dd/MM/yyyy').parse(data['dateOfBirth']);
+                  } catch (e) {
+                    debugPrint('Failed to parse dateOfBirth: ${data['dateOfBirth']}');
+                  }
+                }
+              }
+              _errorMessage = null;
+            });
+          } else {
+            await _handleUnauthorized();
+          }
+        } else {
+          await _handleUnauthorized();
+        }
       } else {
         final error = jsonDecode(response.body)['error'] ?? 'Failed to fetch profile';
         debugPrint('Fetch profile error: $error');
         setState(() {
           _errorMessage = error;
         });
-        if (response.statusCode == 401) {
-          debugPrint('Unauthorized, clearing token');
-          await _storage.delete(key: 'jwt_token');
-          setState(() {
-            _errorMessage = 'Session expired. Please log in again.';
-          });
-        }
       }
     } catch (e) {
       debugPrint('Fetch profile exception: $e');
@@ -121,11 +200,68 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
       });
     } finally {
       setState(() => _isLoading = false);
+      _animationController.reverse();
+    }
+  }
+
+  Future<String?> _refreshToken() async {
+    try {
+      final refreshToken = await _storage.read(key: 'refresh_token');
+      if (refreshToken == null) {
+        debugPrint('No refresh token available');
+        return null;
+      }
+      final refreshResponse = await http.post(
+        Uri.parse(
+            'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/refresh'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': refreshToken}),
+      );
+      if (refreshResponse.statusCode == 200) {
+        final newToken = jsonDecode(refreshResponse.body)['token'];
+        await _storage.write(key: 'jwt_token', value: newToken);
+        debugPrint('Token refreshed successfully');
+        return newToken;
+      } else {
+        debugPrint('Failed to refresh token: ${refreshResponse.body}');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('Refresh token error: $e');
+      return null;
+    }
+  }
+
+  Future<void> _handleUnauthorized() async {
+    bool? logout = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Session Expired'),
+        content: const Text('Your session has expired. Please log in again.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (logout == true) {
+      await _storage.delete(key: 'jwt_token');
+      await _storage.delete(key: 'refresh_token');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isLoggedIn', false);
+      await prefs.remove('phoneNumber');
+      setState(() {
+        _errorMessage = 'Session expired. Please log in again.';
+      });
+      Navigator.pushReplacementNamed(context, '/login');
     }
   }
 
   Future<void> _updateProfile() async {
     setState(() => _isLoading = true);
+    _animationController.forward();
     try {
       final token = await _getToken();
       if (token == null) {
@@ -148,7 +284,8 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
 
       debugPrint('Updating profile with body: $body');
       final response = await http.post(
-        Uri.parse('https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
+        Uri.parse(
+            'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -159,6 +296,7 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
       debugPrint('Profile update response: Status ${response.statusCode}, Body: ${response.body}');
 
       if (response.statusCode == 200) {
+        await _cacheProfileData(body);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Profile updated successfully'), backgroundColor: Colors.green),
         );
@@ -186,6 +324,80 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
       });
     } finally {
       setState(() => _isLoading = false);
+      _animationController.reverse();
+    }
+  }
+
+  Future<void> _logout() async {
+    await _storage.delete(key: 'jwt_token');
+    await _storage.delete(key: 'refresh_token');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+  }
+
+  Future<void> _showLogoutConfirmation() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Text(
+          'Confirm Logout',
+          style: TextStyle(
+            fontFamily: 'Montserrat',
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: Colors.black,
+          ),
+        ),
+        content: Text(
+          'Are you sure you want to logout?',
+          style: TextStyle(
+            fontFamily: 'Montserrat',
+            fontSize: 16,
+            fontWeight: FontWeight.w400,
+            color: Colors.black,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              'No',
+              style: TextStyle(
+                fontFamily: 'Montserrat',
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Colors.black,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+            child: Text(
+              'Yes',
+              style: TextStyle(
+                fontFamily: 'Montserrat',
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _logout();
     }
   }
 
@@ -208,7 +420,6 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          // Header with "G" and "Profile Summary"
                           Container(
                             width: screenWidth,
                             height: screenHeight * 0.12,
@@ -278,7 +489,6 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                               ],
                             ),
                           ),
-                          // Error or User Info
                           if (_errorMessage != null)
                             Padding(
                               padding: EdgeInsets.all(constraints.maxWidth * 0.04),
@@ -319,10 +529,15 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                                     padding: EdgeInsets.all(constraints.maxWidth * 0.08),
                                     decoration: BoxDecoration(
                                       color: Colors.black,
-                                      borderRadius: const BorderRadius.only(
-                                        topLeft: Radius.circular(20),
-                                        topRight: Radius.circular(20),
-                                      ),
+                                      borderRadius: BorderRadius.circular(20),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black26,
+                                          offset: Offset(0, 4),
+                                          blurRadius: 10,
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
                                     ),
                                     child: Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -341,14 +556,24 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                                                 color: Colors.white,
                                               ),
                                             ),
-                                            Text(
-                                              'Bangalore, KA',
-                                              style: TextStyle(
-                                                fontFamily: 'Montserrat',
-                                                fontSize: constraints.maxWidth * 0.06,
-                                                fontWeight: FontWeight.w400,
-                                                color: Colors.white,
-                                              ),
+                                            Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.location_on,
+                                                  color: Colors.grey,
+                                                  size: constraints.maxWidth * 0.06,
+                                                ),
+                                                SizedBox(width: 5),
+                                                Text(
+                                                  'Bangalore, KA',
+                                                  style: TextStyle(
+                                                    fontFamily: 'Montserrat',
+                                                    fontSize: constraints.maxWidth * 0.06,
+                                                    fontWeight: FontWeight.w400,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ],
                                         ),
@@ -364,50 +589,23 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                                       ],
                                     ),
                                   ),
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      border: Border.all(color: Colors.black, width: 2),
-                                      borderRadius: const BorderRadius.only(
-                                        bottomLeft: Radius.circular(20),
-                                        bottomRight: Radius.circular(20),
-                                      ),
-                                    ),
-                                    child: SingleChildScrollView(
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.start,
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            _emailController.text.isNotEmpty
-                                                ? _emailController.text
-                                                : 'No email',
-                                            style: const TextStyle(fontSize: 14),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 5),
-                                          Text(
-                                            _phoneNumber.isNotEmpty
-                                                ? _phoneNumber
-                                                : 'No phone number',
-                                            style: const TextStyle(fontSize: 14),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 5),
-                                          Text(
-                                            _selectedGender ?? 'No gender selected',
-                                            style: const TextStyle(fontSize: 14),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
+                                  Transform.translate(
+                                    offset: Offset(0, -20),
+                                    child: Container(
+                                      width: double.infinity,
+                                      height: 80,
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.black, width: 2),
+                                        borderRadius: const BorderRadius.only(
+                                          bottomLeft: Radius.circular(20),
+                                          bottomRight: Radius.circular(20),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          // Input fields
                           if (_errorMessage == null)
                             Padding(
                               padding: EdgeInsets.symmetric(
@@ -417,13 +615,46 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  _buildTextField(context, 'Full name', _fullNameController, _isEditing, 'Enter your full name'),
+                                  _buildTextField(context, 'Full name', _fullNameController, _isEditing,
+                                      'Enter your full name'),
                                   SizedBox(height: constraints.maxHeight * 0.02),
-                                  _buildTextField(context, 'Email', _emailController, _isEditing, 'example@gmail.com'),
+                                  _buildTextField(context, 'Email', _emailController, _isEditing,
+                                      'example@gmail.com'),
                                   SizedBox(height: constraints.maxHeight * 0.02),
                                   _buildGenderDropdown(context, _isEditing),
                                   SizedBox(height: constraints.maxHeight * 0.02),
                                   _buildDateOfBirthField(context, _isEditing),
+                                  SizedBox(height: constraints.maxHeight * 0.02),
+                                  Align(
+                                    alignment: Alignment.center,
+                                    child: ElevatedButton(
+                                      onPressed: () {
+                                        setState(() => _isEditing = !_isEditing);
+                                        if (!_isEditing) {
+                                          _updateProfile();
+                                        }
+                                      },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.black,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(30),
+                                        ),
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: constraints.maxWidth * 0.08,
+                                          vertical: constraints.maxHeight * 0.02,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        _isEditing ? 'Save' : 'Edit',
+                                        style: TextStyle(
+                                          fontFamily: 'Montserrat',
+                                          fontSize: constraints.maxWidth * 0.04,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -431,20 +662,13 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                           if (_errorMessage == null)
                             Padding(
                               padding: EdgeInsets.only(
-                                right: constraints.maxWidth * 0.04,
-                                bottom: constraints.maxHeight * 0.02,
+                                bottom: constraints.maxHeight * 0.04,
                               ),
-                              child: Align(
-                                alignment: Alignment.centerRight,
+                              child: Center(
                                 child: ElevatedButton(
-                                  onPressed: () {
-                                    setState(() => _isEditing = !_isEditing);
-                                    if (!_isEditing) {
-                                      _updateProfile();
-                                    }
-                                  },
+                                  onPressed: _showLogoutConfirmation,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.black,
+                                    backgroundColor: Colors.red,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(30),
                                     ),
@@ -454,7 +678,7 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                                     ),
                                   ),
                                   child: Text(
-                                    _isEditing ? 'Save' : 'Edit',
+                                    'Logout',
                                     style: TextStyle(
                                       fontFamily: 'Montserrat',
                                       fontSize: constraints.maxWidth * 0.04,
@@ -468,10 +692,34 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                         ],
                       ),
                       if (_isLoading)
-                        Container(
-                          color: Colors.black.withValues(alpha: 0.5),
-                          child: const Center(
-                            child: CircularProgressIndicator(),
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: Container(
+                            color: Colors.black.withOpacity(0.5),
+                            child: Center(
+                              child: Container(
+                                width: 100 * (screenWidth / 392.7),
+                                height: 100 * (screenWidth / 392.7),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.9),
+                                  borderRadius: BorderRadius.circular(20 * (screenWidth / 392.7)),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 5),
+                                    ),
+                                  ],
+                                ),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                                    strokeWidth: 6 * (screenWidth / 392.7),
+                                    backgroundColor: Colors.grey[300],
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                     ],
@@ -497,10 +745,14 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildNavItem(Icons.home, 'Home', 0, () => Navigator.pushReplacementNamed(context, '/home')),
-            _buildNavItem(Icons.map, 'Route', 1, () => Navigator.pushReplacementNamed(context, '/route')),
-            _buildNavItem(Icons.list, 'Trip List', 2, () => Navigator.pushReplacementNamed(context, '/trip_list')),
-            _buildNavItem(Icons.directions_car, 'Vehicle', 3, () => Navigator.pushReplacementNamed(context, '/vehicle')),
+            _buildNavItem(Icons.home, 'Home', 0,
+                () => Navigator.pushReplacementNamed(context, '/home')),
+            _buildNavItem(Icons.map, 'Route', 1,
+                () => Navigator.pushReplacementNamed(context, '/route')),
+            _buildNavItem(Icons.list, 'Trip List', 2,
+                () => Navigator.pushReplacementNamed(context, '/trip-list')),
+            _buildNavItem(Icons.directions_car, 'Vehicle', 3,
+                () => Navigator.pushReplacementNamed(context, '/vehicle')),
           ],
         ),
       ),
@@ -605,7 +857,9 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen> {
                 padding: EdgeInsets.only(left: 20),
                 child: Text('Select Gender'),
               ),
-              onChanged: isEditing ? (String? newValue) => setState(() => _selectedGender = newValue) : null,
+              onChanged: isEditing
+                  ? (String? newValue) => setState(() => _selectedGender = newValue)
+                  : null,
               items: genderOptions.map((String value) {
                 return DropdownMenuItem<String>(
                   value: value,

@@ -4,10 +4,10 @@ import 'package:geooptima/pages/otp-verification.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart'; // Add this import
 
 class RegisterScreen extends StatefulWidget {
-  final String?
-  verifiedPhoneNumber; // Optional pre-filled phone number from OTP
+  final String? verifiedPhoneNumber;
 
   const RegisterScreen({super.key, this.verifiedPhoneNumber});
 
@@ -36,6 +36,8 @@ class _RegisterScreenState extends State<RegisterScreen>
 
   String _selectedCountryCode = '+91';
   String _selectedCountryFlag = '🇮🇳';
+
+  final _storage = const FlutterSecureStorage(); // Initialize secure storage
 
   final List<Map<String, String>> _countries = [
     {'name': 'Afghanistan', 'code': '+93', 'flag': '🇦🇫'},
@@ -160,7 +162,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     {'name': 'Panama', 'code': '+507', 'flag': '🇵🇦'},
     {'name': 'Papua New Guinea', 'code': '+675', 'flag': '🇵🇬'},
     {'name': 'Paraguay', 'code': '+595', 'flag': '🇵🇾'},
-    {'name': 'Peru', 'code': '+51', 'flag': '🇵🇪'},
+    {'name': 'Peru', 'code': '+51', 'flag': '🇵�streamer'},
     {'name': 'Philippines', 'code': '+63', 'flag': '🇵🇭'},
     {'name': 'Poland', 'code': '+48', 'flag': '🇵🇱'},
     {'name': 'Portugal', 'code': '+351', 'flag': '🇵🇹'},
@@ -390,77 +392,79 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   Future<void> _submitFullRegistration() async {
-  final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text}';
-  final validationError = _validateFullRegistration();
+    final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text}';
+    final validationError = _validateFullRegistration();
 
-  if (validationError != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validationError)));
-    return;
-  }
-
-  setState(() {
-    _isLoading = true;
-  });
-
-  try {
-    final response = await http.post(
-      Uri.parse(
-        'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/complete-registration',
-      ),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'phoneNumber': fullPhoneNumber,
-        'fullName': _nameController.text,
-        'email': _emailController.text,
-        'gender': _selectedGender,
-        'dateOfBirth': _dobController.text,
-      }),
-    );
+    if (validationError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validationError)));
+      return;
+    }
 
     setState(() {
-      _isLoading = false;
+      _isLoading = true;
     });
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final String token = data['token'] ?? '';
-      await _saveLoginState(token); // Save login state
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Account created successfully!')),
+    try {
+      final response = await http.post(
+        Uri.parse(
+          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/complete-registration',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'phoneNumber': fullPhoneNumber,
+          'fullName': _nameController.text,
+          'email': _emailController.text,
+          'gender': _selectedGender,
+          'dateOfBirth': _dobController.text,
+        }),
       );
 
-      if (data['token'] != null) {
-        debugPrint('Token received: ${data['token']}');
-      }
+      setState(() {
+        _isLoading = false;
+      });
 
-      Navigator.pushReplacementNamed(context, '/home');
-    } else {
-      String errorMessage = 'Registration failed';
-      try {
-        final errorData = jsonDecode(response.body);
-        errorMessage = errorData['error'] ?? errorMessage;
-      } catch (e) {
-        errorMessage = 'Registration failed. Please try again.';
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final String token = data['token'] ?? '';
+        await _saveLoginState(token); // Save login state
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Account created successfully!')),
+        );
+
+        if (data['token'] != null) {
+          debugPrint('Token received: ${data['token']}');
+        }
+
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        String errorMessage = 'Registration failed';
+        try {
+          final errorData = jsonDecode(response.body);
+          errorMessage = errorData['error'] ?? errorMessage;
+        } catch (e) {
+          errorMessage = 'Registration failed. Please try again.';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage)));
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage)));
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to connect to server: ${e.toString()}')),
+      );
+      debugPrint('Registration error: $e');
     }
-  } catch (e) {
-    setState(() {
-      _isLoading = false;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Failed to connect to server: ${e.toString()}')),
-    );
-    debugPrint('Registration error: $e');
   }
-}
-Future<void> _saveLoginState(String token) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setBool('isLoggedIn', true);
-  await prefs.setString('authToken', token);
-  await prefs.setString('phoneNumber', '$_selectedCountryCode${_phoneController.text}');
-  debugPrint('Login state saved: isLoggedIn=true, token=$token');
-}
+
+  Future<void> _saveLoginState(String token) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLoggedIn', true);
+    await prefs.setString('phoneNumber', '$_selectedCountryCode${_phoneController.text}');
+    await _storage.write(key: 'key_auth_token', value: token); // Use secure storage
+    debugPrint('Login state saved: isLoggedIn=true, token=$token');
+  }
+
   void _toggleCountryDropdown() {
     setState(() {
       _isCountryDropdownOpen = !_isCountryDropdownOpen;
@@ -526,10 +530,9 @@ Future<void> _saveLoginState(String token) async {
         backgroundColor: Colors.white,
         body: Stack(
           children: [
-            // Decorative background elements (restored to original positions)
             Positioned(
-              left: -4, // Original position
-              top: 0, // Original position
+              left: -4,
+              top: 0,
               child: Image.asset(
                 'assets/poly2.png',
                 width: screenWidth * 0.2,
@@ -546,10 +549,8 @@ Future<void> _saveLoginState(String token) async {
               ),
             ),
             Positioned(
-              left: screenWidth * 0.00, // Original position
-              top:
-                  screenHeight *
-                  -0.02, // Original position (slightly off-screen, but intentional)
+              left: screenWidth * 0.00,
+              top: screenHeight * -0.02,
               child: GestureDetector(
                 onTap: () {
                   debugPrint('Back button tapped');
@@ -569,10 +570,8 @@ Future<void> _saveLoginState(String token) async {
               ),
             ),
             Positioned(
-              left: 361.93 * widthRatio, // Original position
-              top:
-                  -206.18 *
-                  heightRatio, // Original position (extends above screen)
+              left: 361.93 * widthRatio,
+              top: -206.18 * heightRatio,
               child: Transform(
                 transform: Matrix4.identity()..rotateZ(1.16),
                 child: Container(
@@ -588,10 +587,8 @@ Future<void> _saveLoginState(String token) async {
               ),
             ),
             Positioned(
-              left: 246 * widthRatio, // Original position
-              top:
-                  -22.14 *
-                  heightRatio, // Original position (slightly above screen)
+              left: 246 * widthRatio,
+              top: -22.14 * heightRatio,
               child: Transform(
                 transform: Matrix4.identity()..rotateZ(-0.44),
                 child: Container(
@@ -623,10 +620,9 @@ Future<void> _saveLoginState(String token) async {
                 ),
               ),
             ),
-            // Main content
             SingleChildScrollView(
               child: Container(
-                height: screenHeight, // Bounded height to resolve flex issue
+                height: screenHeight,
                 padding: EdgeInsets.symmetric(
                   horizontal: 27 * widthRatio,
                   vertical: 20 * heightRatio,
@@ -637,7 +633,7 @@ Future<void> _saveLoginState(String token) async {
                   children: [
                     SizedBox(
                       height: (260 + 50) * heightRatio,
-                    ), // Increased to avoid overlap with "Be a Optima"
+                    ),
                     Text(
                       _fieldsUnlocked
                           ? 'Fill the below details'
@@ -650,7 +646,6 @@ Future<void> _saveLoginState(String token) async {
                     ),
                     SizedBox(height: 20 * heightRatio),
                     if (!_fieldsUnlocked) ...[
-                      // Phone input
                       Container(
                         width: 347 * widthRatio,
                         height: 67 * heightRatio,
@@ -781,7 +776,6 @@ Future<void> _saveLoginState(String token) async {
                           ),
                         ],
                       ),
-                      // Push Google button to bottom
                       Expanded(
                         child: Align(
                           alignment: Alignment.bottomCenter,
@@ -864,7 +858,6 @@ Future<void> _saveLoginState(String token) async {
                         ),
                       ),
                     ] else ...[
-                      // Full registration fields
                       Container(
                         width: 347 * widthRatio,
                         height: 60 * heightRatio,
@@ -1095,13 +1088,10 @@ Future<void> _saveLoginState(String token) async {
                 ),
               ),
             ),
-            // Country dropdown (adjusted position to match original intent)
             if (_isCountryDropdownOpen)
               Positioned(
                 left: 27 * widthRatio,
-                top:
-                    447 *
-                    heightRatio, // Matches original placement below phone input
+                top: 447 * heightRatio,
                 child: Container(
                   width: 347 * widthRatio,
                   height: 300 * heightRatio,
@@ -1148,13 +1138,10 @@ Future<void> _saveLoginState(String token) async {
                   ),
                 ),
               ),
-            // Gender dropdown (adjusted position to match original intent)
             if (_isGenderDropdownOpen)
               Positioned(
                 left: 27 * widthRatio,
-                top:
-                    650 *
-                    heightRatio, // Matches original placement below gender field
+                top: 650 * heightRatio,
                 child: Container(
                   width: 347 * widthRatio,
                   height: 150 * heightRatio,

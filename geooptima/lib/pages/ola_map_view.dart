@@ -41,13 +41,10 @@ class OlaMapView extends StatelessWidget {
   Future<void> _onPlatformViewCreated(int id) async {
     final methodChannel = MethodChannel('ola_map_view_$id');
     try {
-      // Initialize the map with the API key
       await methodChannel.invokeMethod('initializeMap', {'apiKey': apiKey});
-      // Notify the caller (if needed)
       onMapCreated?.call(methodChannel);
     } on PlatformException catch (e) {
       debugPrint('Failed to initialize map: ${e.message}');
-      // Optionally, propagate the error to the caller
     }
   }
 }

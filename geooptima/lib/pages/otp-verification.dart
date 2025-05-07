@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phoneNumber;
-  final bool isFromRegister; // Indicates if the screen is called from register.dart
+  final bool isFromRegister;
   const OtpVerificationScreen({
     super.key,
     required this.phoneNumber,
@@ -27,11 +28,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     (index) => FocusNode(),
   );
   bool _isLoading = false;
+  final _storage = const FlutterSecureStorage(); // Add secure storage
 
   @override
   void initState() {
     super.initState();
-    // Auto-focus on the first OTP field
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_otpFocusNodes.isNotEmpty) {
         FocusScope.of(context).requestFocus(_otpFocusNodes[0]);
@@ -50,15 +51,14 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     super.dispose();
   }
 
-  String get completeOtp =>
-      _otpControllers.map((controller) => controller.text).join();
+  String get completeOtp => _otpControllers.map((controller) => controller.text).join();
 
-  // Save login state and token to shared preferences
+  // Save login state and token to secure storage
   Future<void> _saveLoginState(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLoggedIn', true);
-    await prefs.setString('authToken', token);
     await prefs.setString('phoneNumber', widget.phoneNumber);
+    await _storage.write(key: 'key_auth_token', value: token); // Use secure storage
     debugPrint('Login state saved: isLoggedIn=true, token=$token, phoneNumber=${widget.phoneNumber}');
   }
 
@@ -76,9 +76,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse(
-          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/verify-otp',
-        ),
+        Uri.parse('https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/verify-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'phoneNumber': widget.phoneNumber,
@@ -101,7 +99,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           return;
         }
 
-        // Save login state for both login and registration flows
         await _saveLoginState(token);
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -109,10 +106,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         );
 
         if (widget.isFromRegister) {
-          // Return to register.dart with verification result and token
           Navigator.pop(context, {'verified': true, 'token': token});
         } else {
-          // Redirect to home screen for login flow
           Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
         }
       } else {

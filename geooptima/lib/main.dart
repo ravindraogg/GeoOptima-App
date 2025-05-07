@@ -3,6 +3,8 @@ import 'package:geooptima/pages/home.dart';
 import 'package:geooptima/pages/profile_summary_screen.dart';
 import 'package:geooptima/pages/register.dart';
 import 'package:geooptima/pages/login.dart';
+import 'package:geooptima/pages/search_page.dart';
+import 'package:geooptima/pages/trip_list.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -44,6 +46,8 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginScreen(),
         '/home': (context) => const HomePage(),
         '/profile': (context) => const ProfileSummaryScreen(),
+        '/search': (context) => const SearchPage(),
+        '/trip-list': (context) => const TripListPage(),
       },
     );
   }

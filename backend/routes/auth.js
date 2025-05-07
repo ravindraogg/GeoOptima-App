@@ -90,7 +90,6 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
-// Complete Registration
 router.post('/complete-registration', async (req, res) => {
   const { phoneNumber, fullName, email, gender, dateOfBirth } = req.body;
 
