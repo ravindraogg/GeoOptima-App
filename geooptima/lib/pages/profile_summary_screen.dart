@@ -84,126 +84,142 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen>
     await prefs.setString('cached_dateOfBirth', data['dateOfBirth'] ?? '');
   }
 
-  Future<void> _checkTokenAndFetchProfile() async {
+ Future<void> _checkTokenAndFetchProfile() async {
+  final token = await _getToken();
+  if (token == null) {
+    debugPrint('No token found, checking cached login state');
+    final prefs = await SharedPreferences.getInstance();
+    final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+    if (isLoggedIn) {
+      await _fetchProfile(); // Attempt to fetch with cached token
+    } else {
+      setState(() {
+        _errorMessage = 'Please log in to view your profile.';
+      });
+    }
+    return;
+  }
+  await _fetchProfile();
+}
+
+Future<void> _fetchProfile() async {
+  setState(() => _isLoading = true);
+  _animationController.forward();
+  try {
     final token = await _getToken();
     if (token == null) {
-      debugPrint('No token found');
+      debugPrint('Token is null during fetch');
       setState(() {
         _errorMessage = 'Please log in to view your profile.';
       });
       return;
     }
-    _fetchProfile();
-  }
 
-  Future<void> _fetchProfile() async {
-    setState(() => _isLoading = true);
-    _animationController.forward();
-    try {
-      final token = await _getToken();
-      if (token == null) {
-        debugPrint('Token is null during fetch');
-        setState(() {
-          _errorMessage = 'Please log in to view your profile.';
-        });
-        return;
-      }
+    debugPrint('Token: $token');
+    final response = await http.get(
+      Uri.parse(
+          'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    );
 
-      debugPrint('Token: $token');
-      final response = await http.get(
-        Uri.parse(
-            'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+    debugPrint('Response Status: ${response.statusCode}');
+    debugPrint('Response Body: ${response.body}');
 
-      debugPrint('Response Status: ${response.statusCode}');
-      debugPrint('Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        debugPrint('Profile data: $data');
-        await _cacheProfileData(data);
-        setState(() {
-          _phoneNumber = data['phoneNumber'] ?? '';
-          _fullNameController.text = data['fullName'] ?? '';
-          _emailController.text = data['email'] ?? '';
-          _selectedGender = data['gender'] != '' ? data['gender'] : null;
-          if (data['dateOfBirth'] != null) {
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      debugPrint('Profile data: $data');
+      await _cacheProfileData(data);
+      setState(() {
+        _phoneNumber = data['phoneNumber'] ?? '';
+        _fullNameController.text = data['fullName'] ?? '';
+        _emailController.text = data['email'] ?? '';
+        _selectedGender = data['gender'] != '' ? data['gender'] : null;
+        if (data['dateOfBirth'] != null) {
+          try {
+            _selectedDateOfBirth = DateTime.parse(data['dateOfBirth']);
+          } catch (e) {
             try {
-              _selectedDateOfBirth = DateTime.parse(data['dateOfBirth']);
+              _selectedDateOfBirth =
+                  DateFormat('dd/MM/yyyy').parse(data['dateOfBirth']);
             } catch (e) {
-              try {
-                _selectedDateOfBirth =
-                    DateFormat('dd/MM/yyyy').parse(data['dateOfBirth']);
-              } catch (e) {
-                debugPrint('Failed to parse dateOfBirth: ${data['dateOfBirth']}');
-              }
+              debugPrint('Failed to parse dateOfBirth: ${data['dateOfBirth']}');
             }
           }
-          _errorMessage = null;
-        });
-      } else if (response.statusCode == 401) {
-        debugPrint('Received 401, attempting to refresh token');
-        final newToken = await _refreshToken();
-        if (newToken != null) {
-          debugPrint('Retrying profile fetch with new token');
-          final retryResponse = await http.get(
-            Uri.parse(
-                'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
-            headers: {
-              'Authorization': 'Bearer $newToken',
-              'Content-Type': 'application/json',
-            },
-          );
-          if (retryResponse.statusCode == 200) {
-            final data = jsonDecode(retryResponse.body);
-            await _cacheProfileData(data);
-            setState(() {
-              _phoneNumber = data['phoneNumber'] ?? '';
-              _fullNameController.text = data['fullName'] ?? '';
-              _emailController.text = data['email'] ?? '';
-              _selectedGender = data['gender'] != '' ? data['gender'] : null;
-              if (data['dateOfBirth'] != null) {
+        }
+        _errorMessage = null;
+      });
+    } else if (response.statusCode == 401) {
+      debugPrint('Received 401, attempting to refresh token');
+      final newToken = await _refreshToken();
+      if (newToken != null) {
+        debugPrint('Retrying profile fetch with new token');
+        final retryResponse = await http.get(
+          Uri.parse(
+              'https://backend-codecrib-cja0h8fdepdbfkgx.canadacentral-01.azurewebsites.net/api/auth/profile'),
+          headers: {
+            'Authorization': 'Bearer $newToken',
+            'Content-Type': 'application/json',
+          },
+        );
+        if (retryResponse.statusCode == 200) {
+          final data = jsonDecode(retryResponse.body);
+          await _cacheProfileData(data);
+          setState(() {
+            _phoneNumber = data['phoneNumber'] ?? '';
+            _fullNameController.text = data['fullName'] ?? '';
+            _emailController.text = data['email'] ?? '';
+            _selectedGender = data['gender'] != '' ? data['gender'] : null;
+            if (data['dateOfBirth'] != null) {
+              try {
+                _selectedDateOfBirth = DateTime.parse(data['dateOfBirth']);
+              } catch (e) {
                 try {
-                  _selectedDateOfBirth = DateTime.parse(data['dateOfBirth']);
+                  _selectedDateOfBirth =
+                      DateFormat('dd/MM/yyyy').parse(data['dateOfBirth']);
                 } catch (e) {
-                  try {
-                    _selectedDateOfBirth =
-                        DateFormat('dd/MM/yyyy').parse(data['dateOfBirth']);
-                  } catch (e) {
-                    debugPrint('Failed to parse dateOfBirth: ${data['dateOfBirth']}');
-                  }
+                  debugPrint('Failed to parse dateOfBirth: ${data['dateOfBirth']}');
                 }
               }
-              _errorMessage = null;
-            });
-          } else {
-            await _handleUnauthorized();
-          }
+            }
+            _errorMessage = null;
+          });
         } else {
           await _handleUnauthorized();
         }
       } else {
-        final error = jsonDecode(response.body)['error'] ?? 'Failed to fetch profile';
-        debugPrint('Fetch profile error: $error');
-        setState(() {
-          _errorMessage = error;
-        });
+        await _handleUnauthorized();
       }
-    } catch (e) {
-      debugPrint('Fetch profile exception: $e');
+    } else {
+      final error = jsonDecode(response.body)['error'] ?? 'Failed to fetch profile';
+      debugPrint('Fetch profile error: $error');
       setState(() {
-        _errorMessage = 'Network error: $e';
+        _errorMessage = error;
       });
-    } finally {
-      setState(() => _isLoading = false);
-      _animationController.reverse();
     }
+  } catch (e) {
+    debugPrint('Fetch profile exception: $e');
+    setState(() {
+      _errorMessage = 'Network error: $e';
+    });
+  } finally {
+    setState(() => _isLoading = false);
+    _animationController.reverse();
   }
+}
 
+Future<void> _handleUnauthorized() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool('isLoggedIn', false);
+  await _storage.delete(key: 'jwt_token');
+  await _storage.delete(key: 'refresh_token');
+  setState(() {
+    _errorMessage = 'Session expired. Please log in again.';
+  });
+  await Navigator.pushReplacementNamed(context, '/login');
+}
   Future<String?> _refreshToken() async {
     try {
       final refreshToken = await _storage.read(key: 'refresh_token');
@@ -232,32 +248,6 @@ class _ProfileSummaryScreenState extends State<ProfileSummaryScreen>
     }
   }
 
-  Future<void> _handleUnauthorized() async {
-    bool? logout = await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Session Expired'),
-        content: const Text('Your session has expired. Please log in again.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-    if (logout == true) {
-      await _storage.delete(key: 'jwt_token');
-      await _storage.delete(key: 'refresh_token');
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('isLoggedIn', false);
-      await prefs.remove('phoneNumber');
-      setState(() {
-        _errorMessage = 'Session expired. Please log in again.';
-      });
-      Navigator.pushReplacementNamed(context, '/login');
-    }
-  }
 
   Future<void> _updateProfile() async {
     setState(() => _isLoading = true);

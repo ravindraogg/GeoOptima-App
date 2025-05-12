@@ -1,3 +1,4 @@
+// ignore_for_file: unused_element
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -55,7 +56,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   MethodChannel? platform;
-  LatLng _currentPosition = LatLng(12.9549, 77.5742); // Default position
+  LatLng _currentPosition = LatLng(12.9716, 77.5946);
   bool _isLoading = true;
   bool _isMapLoading = true;
   bool _isMapReady = false;
@@ -531,46 +532,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     debugPrint('Login state cleared');
   }
 
-  Future<bool> _onWillPop() async {
-    if (_isFullScreen) {
-      _toggleFullScreen();
-      return false;
-    }
-
-    return await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(
-              'Exit App',
-              style: GoogleFonts.montserrat(fontWeight: FontWeight.w600),
-            ),
-            content: Text(
-              'Do you want to exit the app or go back to login/register?',
-              style: GoogleFonts.montserrat(),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: Text(
-                  'Cancel',
-                  style: GoogleFonts.montserrat(color: Colors.black),
-                ),
-              ),
-              TextButton(
-                onPressed: () async {
-                  await _clearLoginState();
-                  Navigator.of(context).pop(true);
-                },
-                child: Text(
-                  'Logout',
-                  style: GoogleFonts.montserrat(color: Colors.red),
-                ),
-              ),
-            ],
-          ),
-        ) ??
-        false;
+ Future<bool> _onWillPop() async {
+  if (_isFullScreen) {
+    _toggleFullScreen();
+    return false;
   }
+
+  return await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(
+            'Exit App',
+            style: GoogleFonts.montserrat(fontWeight: FontWeight.w600),
+          ),
+          content: Text(
+            'Do you want to exit the app?',
+            style: GoogleFonts.montserrat(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(
+                'No',
+                style: GoogleFonts.montserrat(color: Colors.black),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(
+                'Yes',
+                style: GoogleFonts.montserrat(color: Colors.red),
+              ),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+}
 
   @override
   Widget build(BuildContext context) {
@@ -1077,7 +1075,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                Navigator.pushNamed(context, '/trip-list');
             }),
             const SizedBox(height: 25),
-            _sidebarButton(Icons.directions_car, () {}),
+            _sidebarButton(Icons.directions_car, () {
+               Navigator.pushNamed(context, '/vehicle');
+            }),
             const SizedBox(height: 25),
             _sidebarButton(Icons.music_note, () {}),
             const Spacer(),

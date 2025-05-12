@@ -5,6 +5,7 @@ import 'package:geooptima/pages/register.dart';
 import 'package:geooptima/pages/login.dart';
 import 'package:geooptima/pages/search_page.dart';
 import 'package:geooptima/pages/trip_list.dart';
+import 'package:geooptima/pages/vehicle_page.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -39,7 +40,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      initialRoute: isLoggedIn ? '/home' : '/', // Redirect to home if logged in
+      initialRoute: isLoggedIn ? '/home' : '/',
       routes: {
         '/': (context) => const ResponsiveScreen(),
         '/register': (context) => const RegisterScreen(),
@@ -48,6 +49,7 @@ class MyApp extends StatelessWidget {
         '/profile': (context) => const ProfileSummaryScreen(),
         '/search': (context) => const SearchPage(),
         '/trip-list': (context) => const TripListPage(),
+        '/vehicle': (context) => const VehiclePage(),
       },
     );
   }

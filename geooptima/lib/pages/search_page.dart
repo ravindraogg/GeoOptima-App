@@ -1,3 +1,4 @@
+// ignore_for_file: unused_field
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -6,7 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:developer' as developer;
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Add SharedPreferences package
+import 'package:shared_preferences/shared_preferences.dart';
 
 class OlaPlacesService {
   static const MethodChannel _channel = MethodChannel('ola_places');
@@ -91,7 +92,7 @@ class _SearchPageState extends State<SearchPage> {
   bool _showAll = false;
   bool _showSuggestions = false;
   List<Map<String, dynamic>> _nearbyLocations = [];
-  static const String _defaultLocation = '12.931316595874005,77.61649243443775'; // Bengaluru
+  static const String _defaultLocation = '12.931316595874005,77.61649243443775';
 
   // Variables to store user data from SharedPreferences and secure storage
   bool _isLoggedIn = false;
@@ -272,8 +273,6 @@ class _SearchPageState extends State<SearchPage> {
       if (_authToken == null) {
         throw Exception('No authentication token found');
       }
-
-      // Use suggestion data if provided, otherwise perform text search
       Map<String, dynamic> searchEntry;
       if (suggestion != null) {
         final placeDetails = await OlaPlacesService.placeDetails(suggestion['placeId']);
